@@ -1,0 +1,632 @@
+<?xml version="1.0" encoding="utf-8"?>
+<helpItems schema="maml" xmlns="http://msh">
+  <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
+    <command:details>
+      <command:name>Get-CertToolboxCaaRecord</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>CertToolboxCaaRecord</command:noun>
+      <maml:description>
+        <maml:para>Gets the DNS CAA records that apply to a domain, telling which CAs may issue for it.</maml:para>
+      </maml:description>
+    </command:details>
+    <maml:description>
+      <maml:para>Looks up the CAA record set relevant to each name the way a CA has to (RFC 8659): the name itself first, then each parent domain in turn until a CAA record set is found. The output says which name the records were found on.</maml:para>
+      <maml:para>HasCaaRecord is $false when no CAA record exists anywhere up the tree: issuance is not restricted, any CA may issue.</maml:para>
+      <maml:para>Issue lists the CA domains allowed to issue. IssueRestricted is $true when the record set has at least one "issue" record; an empty Issue list with IssueRestricted $true means no CA may issue at all.</maml:para>
+      <maml:para>IssueWild is the same for wildcard certificates. When the record set has no "issuewild" record, wildcard issuance follows the "issue" records, and IssueWild repeats them.</maml:para>
+      <maml:para>Record holds every record of the set as returned, including tags this cmdlet does not interpret.</maml:para>
+      <maml:para>DNS is queried through Google's DNS-over-HTTPS API (dns.google), so it works identically on every platform; the names queried are sent to that service.</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-CertToolboxCaaRecord</maml:name>
+        <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="Domain, DnsName, HostName">
+          <maml:name>Name</maml:name>
+          <maml:description>
+            <maml:para>One or more DNS names. A leading "*." is ignored, so a wildcard name can be given as is.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>TimeoutSec</maml:name>
+          <maml:description>
+            <maml:para>Timeout, in seconds, of each DNS query.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>10</dev:defaultValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="Domain, DnsName, HostName">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>One or more DNS names. A leading "*." is ignored, so a wildcard name can be given as is.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>TimeoutSec</maml:name>
+        <maml:description>
+          <maml:para>Timeout, in seconds, of each DNS query.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>10</dev:defaultValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <maml:name>System.String. Names can be piped in, as strings or as objects with a Name property.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <maml:name>PSCustomObject (type name CertToolbox.CaaRecord), one per name.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para></maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 1 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxCaaRecord -Name 'www.example.com'</dev:code>
+        <dev:remarks>
+          <maml:para>Shows which CAs may issue for www.example.com and where the restriction is defined.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 2 --------------------------</maml:title>
+        <dev:code>'example.com', 'example.org' | Get-CertToolboxCaaRecord | Select-Object Name, RecordSetName, Issue, IssueWild</dev:code>
+        <dev:remarks>
+          <maml:para></maml:para>
+        </dev:remarks>
+      </command:example>
+    </command:examples>
+    <command:relatedLinks />
+  </command:command>
+  <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
+    <command:details>
+      <command:name>Get-CertToolboxTlsCertificate</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>CertToolboxTlsCertificate</command:noun>
+      <maml:description>
+        <maml:para>Connects to a TLS endpoint and reports the negotiated session, the certificate chain the server sent, and the chain this machine builds from it.</maml:para>
+      </maml:description>
+    </command:details>
+    <maml:description>
+      <maml:para>One connection gives both views of the chain, and three properties comparing them.</maml:para>
+      <maml:para>ServerChain holds the certificates the server actually sent, leaf first. This is what every client receives, whatever its own stores contain.</maml:para>
+      <maml:para>LocalChain holds the chain this machine built to a root, using the server's certificates, its own certificate stores and, where the platform does it, downloaded intermediates. Each element carries its own Status flags (empty when it has no error).</maml:para>
+      <maml:para>MissingIntermediate lists the certificates the local chain needed that the server did not send (roots excluded). Clients that cannot find them on their own will fail.</maml:para>
+      <maml:para>ServerSentRoot is true when the server sent a self-signed certificate after the leaf, which is useless.</maml:para>
+      <maml:para>UnusedServerCertificate lists the certificates the server sent that this machine did not use.</maml:para>
+      <maml:para>The connection is never refused because of the certificate: validation problems are reported in ValidationPassed, PolicyError and ChainStatus instead, so that broken endpoints can be inspected.</maml:para>
+      <maml:para>The handshake is done by the operating system's TLS stack. The protocol versions and cipher suites that can be offered therefore depend on the machine this runs on, and CipherSuite is only available under PowerShell 7 and later.</maml:para>
+      <maml:para>Mail servers that start in plaintext and upgrade to TLS are reached with the StartTls parameter: the cmdlet speaks just enough SMTP, IMAP or POP3 to check that the server offers the upgrade and to request it, then does the same handshake. Use the Verbose switch to see that dialogue.</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-CertToolboxTlsCertificate</maml:name>
+        <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+          <maml:name>HostName</maml:name>
+          <maml:description>
+            <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>Port</maml:name>
+          <maml:description>
+            <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>443</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+          <maml:name>TargetHost</maml:name>
+          <maml:description>
+            <maml:para>Name sent as SNI and matched against the certificate, when it differs from HostName (for example when connecting to an IP address or to one node behind a load balancer).</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>Protocol</maml:name>
+          <maml:description>
+            <maml:para>Protocol versions to offer. SystemDefault (the default) lets the operating system choose. Use Test-CertToolboxTlsProtocol to probe each version separately.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>@('SystemDefault')</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>TimeoutSec</maml:name>
+          <maml:description>
+            <maml:para>Timeout, in seconds, for the TCP connection and for each step of the handshake.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>10</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>CheckRevocation</maml:name>
+          <maml:description>
+            <maml:para>Also checks certificate revocation while building the local chain.</maml:para>
+          </maml:description>
+          <dev:type>
+            <maml:name>SwitchParameter</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>False</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>StartTls</maml:name>
+          <maml:description>
+            <maml:para>The mail protocol to speak in plaintext before upgrading to TLS: Smtp, Imap or Pop3. Omit it for a server that expects TLS from the first byte (HTTPS, SMTPS on 465, IMAPS on 993, POP3S on 995).</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>SmtpEhloName</maml:name>
+          <maml:description>
+            <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name; set it when a server rejects or delays that name.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+        <maml:name>HostName</maml:name>
+        <maml:description>
+          <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>Port</maml:name>
+        <maml:description>
+          <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>443</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+        <maml:name>TargetHost</maml:name>
+        <maml:description>
+          <maml:para>Name sent as SNI and matched against the certificate, when it differs from HostName (for example when connecting to an IP address or to one node behind a load balancer).</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>Protocol</maml:name>
+        <maml:description>
+          <maml:para>Protocol versions to offer. SystemDefault (the default) lets the operating system choose. Use Test-CertToolboxTlsProtocol to probe each version separately.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>@('SystemDefault')</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>TimeoutSec</maml:name>
+        <maml:description>
+          <maml:para>Timeout, in seconds, for the TCP connection and for each step of the handshake.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>10</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>CheckRevocation</maml:name>
+        <maml:description>
+          <maml:para>Also checks certificate revocation while building the local chain.</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
+        <dev:type>
+          <maml:name>SwitchParameter</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>False</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>StartTls</maml:name>
+        <maml:description>
+          <maml:para>The mail protocol to speak in plaintext before upgrading to TLS: Smtp, Imap or Pop3. Omit it for a server that expects TLS from the first byte (HTTPS, SMTPS on 465, IMAPS on 993, POP3S on 995).</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>SmtpEhloName</maml:name>
+        <maml:description>
+          <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name; set it when a server rejects or delays that name.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <maml:name>System.String. Host names as strings, or objects with HostName, Port, TargetHost and StartTls properties.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <maml:name>PSCustomObject (type name CertToolbox.TlsCertificate), one per host.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para></maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 1 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxTlsCertificate -HostName 'www.example.com'</dev:code>
+        <dev:remarks>
+          <maml:para></maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 2 --------------------------</maml:title>
+        <dev:code>(Get-CertToolboxTlsCertificate 'www.example.com').ServerChain | Select-Object Subject, Issuer, NotAfter</dev:code>
+        <dev:remarks>
+          <maml:para>Lists the certificates the server sends.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 3 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxTlsCertificate -HostName '192.0.2.10' -TargetHost 'www.example.com' -Port 8443</dev:code>
+        <dev:remarks>
+          <maml:para>Connects to a specific address while presenting www.example.com as the server name.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 4 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxTlsCertificate -HostName 'mail.example.com' -Port 587 -StartTls Smtp -Verbose</dev:code>
+        <dev:remarks>
+          <maml:para>Inspects the certificate of a mail submission server, showing the SMTP dialogue.</maml:para>
+        </dev:remarks>
+      </command:example>
+    </command:examples>
+    <command:relatedLinks />
+  </command:command>
+  <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
+    <command:details>
+      <command:name>Test-CertToolboxTlsProtocol</command:name>
+      <command:verb>Test</command:verb>
+      <command:noun>CertToolboxTlsProtocol</command:noun>
+      <maml:description>
+        <maml:para>Probes a TLS endpoint once per protocol version and reports which ones could be negotiated.</maml:para>
+      </maml:description>
+    </command:details>
+    <maml:description>
+      <maml:para>Makes a separate connection for each protocol version, offering only that version, and returns one result per version.</maml:para>
+      <maml:para>Read the Negotiated property as "could be negotiated from this machine", not as "the server supports it". The handshake is done by the operating system's TLS stack, and a version that the local system has disabled or does not implement fails here whatever the server accepts; ErrorType and ErrorMessage carry the underlying failure so the two cases can be told apart. A $true result is always conclusive; a $false one only is when the same version works from this machine against another server.</maml:para>
+      <maml:para>Mail servers that start in plaintext and upgrade to TLS are probed with the StartTls parameter; the plaintext exchange is then repeated on each connection. When that exchange itself fails (the server does not offer the upgrade, for instance), every version is reported as not negotiated with that error.</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Test-CertToolboxTlsProtocol</maml:name>
+        <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+          <maml:name>HostName</maml:name>
+          <maml:description>
+            <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>Port</maml:name>
+          <maml:description>
+            <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>443</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+          <maml:name>TargetHost</maml:name>
+          <maml:description>
+            <maml:para>Name sent as SNI, when it differs from HostName.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>Protocol</maml:name>
+          <maml:description>
+            <maml:para>The protocol versions to probe. Defaults to all of Ssl3, Tls, Tls11, Tls12 and Tls13.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>@('Ssl3', 'Tls', 'Tls11', 'Tls12', 'Tls13')</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>TimeoutSec</maml:name>
+          <maml:description>
+            <maml:para>Timeout, in seconds, for each connection and each step of its handshake.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>10</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>StartTls</maml:name>
+          <maml:description>
+            <maml:para>The mail protocol to speak in plaintext before upgrading to TLS: Smtp, Imap or Pop3. Omit it for a server that expects TLS from the first byte.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>SmtpEhloName</maml:name>
+          <maml:description>
+            <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+        <maml:name>HostName</maml:name>
+        <maml:description>
+          <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>Port</maml:name>
+        <maml:description>
+          <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>443</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+        <maml:name>TargetHost</maml:name>
+        <maml:description>
+          <maml:para>Name sent as SNI, when it differs from HostName.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>Protocol</maml:name>
+        <maml:description>
+          <maml:para>The protocol versions to probe. Defaults to all of Ssl3, Tls, Tls11, Tls12 and Tls13.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>@('Ssl3', 'Tls', 'Tls11', 'Tls12', 'Tls13')</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>TimeoutSec</maml:name>
+        <maml:description>
+          <maml:para>Timeout, in seconds, for each connection and each step of its handshake.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>10</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>StartTls</maml:name>
+        <maml:description>
+          <maml:para>The mail protocol to speak in plaintext before upgrading to TLS: Smtp, Imap or Pop3. Omit it for a server that expects TLS from the first byte.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>SmtpEhloName</maml:name>
+        <maml:description>
+          <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <maml:name>System.String. Host names as strings, or objects with HostName, Port, TargetHost and StartTls properties.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <maml:name>PSCustomObject (type name CertToolbox.TlsProtocolResult), one per host and protocol.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para></maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 1 --------------------------</maml:title>
+        <dev:code>Test-CertToolboxTlsProtocol -HostName 'www.example.com' | Format-Table Protocol, Negotiated, CipherSuite, ErrorMessage</dev:code>
+        <dev:remarks>
+          <maml:para></maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 2 --------------------------</maml:title>
+        <dev:code>Test-CertToolboxTlsProtocol -HostName 'mail.example.com' -Port 993 -Protocol Tls12, Tls13</dev:code>
+        <dev:remarks>
+          <maml:para></maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 3 --------------------------</maml:title>
+        <dev:code>Test-CertToolboxTlsProtocol -HostName 'mail.example.com' -StartTls Smtp</dev:code>
+        <dev:remarks>
+          <maml:para>Probes the TLS versions of a mail server on port 25, upgrading with STARTTLS each time.</maml:para>
+        </dev:remarks>
+      </command:example>
+    </command:examples>
+    <command:relatedLinks />
+  </command:command>
+</helpItems>

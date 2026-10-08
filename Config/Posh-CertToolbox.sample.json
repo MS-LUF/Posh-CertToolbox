@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "Logging": {
+    "Enabled": false,
+    "MinimumLevel": "Information",
+    "Mode": "File",
+    "File": {
+      "FileName": "Posh-CertToolbox-{yyyyMMdd}.log"
+    },
+    "EventLog": {
+      "LogName": "Application",
+      "Source": "Posh-CertToolbox",
+      "EventIdInformation": 1000,
+      "EventIdWarning": 2000,
+      "EventIdError": 3000
+    }
+  }
+}
