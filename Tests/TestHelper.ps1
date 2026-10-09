@@ -56,6 +56,324 @@ function Get-TestCertificateChain {
     }
 }
 
+function ConvertTo-TestDer {
+    <#
+    .SYNOPSIS
+        Encodes one DER element, for building test fixtures independently of the module's own
+        encoder.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [int] $Tag,
+
+        [AllowEmptyCollection()]
+        [byte[]] $Content = @()
+    )
+
+    $length = $Content.Length
+    if ($length -lt 0x80) {
+        $header = [byte[]]@($Tag, $length)
+    } elseif ($length -lt 0x100) {
+        $header = [byte[]]@($Tag, 0x81, $length)
+    } elseif ($length -lt 0x10000) {
+        $header = [byte[]]@($Tag, 0x82, ($length -shr 8), ($length -band 0xFF))
+    } else {
+        $header = [byte[]]@($Tag, 0x83, ($length -shr 16), (($length -shr 8) -band 0xFF), ($length -band 0xFF))
+    }
+    , ([byte[]]($header + $Content))
+}
+
+function ConvertTo-TestDerTime {
+    <#
+    .SYNOPSIS
+        Encodes a date as a DER UTCTime, or as a GeneralizedTime with -Generalized.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [datetime] $Value,
+
+        [switch] $Generalized
+    )
+
+    if ($Generalized) {
+        ConvertTo-TestDer -Tag 0x18 -Content ([System.Text.Encoding]::ASCII.GetBytes($Value.ToString('yyyyMMddHHmmss') + 'Z'))
+    } else {
+        ConvertTo-TestDer -Tag 0x17 -Content ([System.Text.Encoding]::ASCII.GetBytes($Value.ToString('yyMMddHHmmss') + 'Z'))
+    }
+}
+
+function Get-TestCertificateWithUrl {
+    <#
+    .SYNOPSIS
+        Builds an in-memory CA and a leaf certificate carrying the given CRL, OCSP and CA Issuers
+        URLs in its CRL Distribution Points and Authority Information Access extensions.
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]] $CrlUrl = @(),
+
+        [string[]] $OcspUrl = @(),
+
+        [string[]] $CaIssuersUrl = @(),
+
+        [byte[]] $SerialNumber = @(0x0A, 0x0B, 0x0C, 0x0D)
+    )
+
+    $sha256 = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+    $padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+    $now = [System.DateTimeOffset]::UtcNow
+
+    $caKey = [System.Security.Cryptography.RSA]::Create(2048)
+    $caRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=CertToolbox Url Test CA', $caKey, $sha256, $padding)
+    $caRequest.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true, $false, 0, $true))
+    $ca = $caRequest.CreateSelfSigned($now.AddDays(-2), $now.AddDays(60))
+
+    $leafKey = [System.Security.Cryptography.RSA]::Create(2048)
+    $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=url.test.example', $leafKey, $sha256, $padding)
+
+    if ($CrlUrl.Count -gt 0) {
+        # SEQUENCE OF DistributionPoint { distributionPoint [0] { fullName [0] { URI [6] } } }
+        $points = [byte[]]@()
+        foreach ($value in $CrlUrl) {
+            $uri = ConvertTo-TestDer -Tag 0x86 -Content ([System.Text.Encoding]::ASCII.GetBytes($value))
+            $points = [byte[]]($points + (ConvertTo-TestDer -Tag 0x30 -Content (ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDer -Tag 0xA0 -Content $uri))))
+        }
+        $leafRequest.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509Extension]::new(
+                '2.5.29.31', (ConvertTo-TestDer -Tag 0x30 -Content $points), $false))
+    }
+
+    if ($OcspUrl.Count + $CaIssuersUrl.Count -gt 0) {
+        # SEQUENCE OF AccessDescription { accessMethod OID, accessLocation URI [6] }
+        $descriptions = [byte[]]@()
+        foreach ($pair in @(
+                foreach ($value in $OcspUrl) { @{ Last = 0x01; Url = $value } }
+                foreach ($value in $CaIssuersUrl) { @{ Last = 0x02; Url = $value } }
+            )) {
+            $oid = ConvertTo-TestDer -Tag 0x06 -Content ([byte[]](0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, $pair.Last))
+            $uri = ConvertTo-TestDer -Tag 0x86 -Content ([System.Text.Encoding]::ASCII.GetBytes($pair.Url))
+            $descriptions = [byte[]]($descriptions + (ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]($oid + $uri))))
+        }
+        $leafRequest.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509Extension]::new(
+                '1.3.6.1.5.5.7.1.1', (ConvertTo-TestDer -Tag 0x30 -Content $descriptions), $false))
+    }
+
+    $leaf = $leafRequest.Create($ca, $now.AddDays(-1), $now.AddDays(30), $SerialNumber)
+
+    [PSCustomObject]@{
+        Issuer = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$ca.RawData)
+        Leaf   = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$leaf.RawData)
+    }
+}
+
+function Get-TestCrl {
+    <#
+    .SYNOPSIS
+        Builds the bytes of a (unsigned, structurally valid) certificate revocation list.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [datetime] $ThisUpdate = [datetime]::UtcNow.AddDays(-1),
+
+        [Nullable[datetime]] $NextUpdate = [datetime]::UtcNow.AddDays(6),
+
+        # Each serial as its bytes, most significant first.
+        [byte[][]] $RevokedSerial = @(),
+
+        # Extra entries with other serials, to make the list long.
+        [int] $PaddingEntryCount = 0,
+
+        [switch] $GeneralizedNextUpdate,
+
+        [switch] $WithoutVersion,
+
+        [switch] $AsPem
+    )
+
+    $algorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, 0x05, 0x00))
+    $revokedAt = ConvertTo-TestDerTime -Value $ThisUpdate
+
+    $entries = [System.IO.MemoryStream]::new()
+    for ($i = 0; $i -lt $PaddingEntryCount; $i++) {
+        $serial = [byte[]](0x7F, (($i -shr 16) -band 0xFF), (($i -shr 8) -band 0xFF), ($i -band 0xFF))
+        $entry = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x02 -Content $serial) + $revokedAt))
+        $entries.Write($entry, 0, $entry.Length)
+    }
+    foreach ($serial in $RevokedSerial) {
+        $entry = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x02 -Content $serial) + $revokedAt))
+        $entries.Write($entry, 0, $entry.Length)
+    }
+
+    $tbs = [System.IO.MemoryStream]::new()
+    $parts = @()
+    if (-not $WithoutVersion) {
+        $parts += , (ConvertTo-TestDer -Tag 0x02 -Content ([byte[]]@(1)))
+    }
+    $parts += , $algorithm
+    $parts += , (ConvertTo-TestDer -Tag 0x30)
+    $parts += , (ConvertTo-TestDerTime -Value $ThisUpdate)
+    if ($null -ne $NextUpdate) {
+        $parts += , (ConvertTo-TestDerTime -Value $NextUpdate -Generalized:$GeneralizedNextUpdate)
+    }
+    if ($entries.Length -gt 0) {
+        $parts += , (ConvertTo-TestDer -Tag 0x30 -Content $entries.ToArray())
+    }
+    foreach ($part in $parts) {
+        $tbs.Write($part, 0, $part.Length)
+    }
+
+    $signature = ConvertTo-TestDer -Tag 0x03 -Content ([byte[]](0x00, 0x01, 0x02, 0x03))
+    $crl = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x30 -Content $tbs.ToArray()) + $algorithm + $signature))
+
+    if ($AsPem) {
+        $text = "-----BEGIN X509 CRL-----`n" + [System.Convert]::ToBase64String($crl, 'InsertLineBreaks') + "`n-----END X509 CRL-----`n"
+        return , ([System.Text.Encoding]::ASCII.GetBytes($text))
+    }
+    , $crl
+}
+
+function Get-TestOcspResponse {
+    <#
+    .SYNOPSIS
+        Builds the bytes of a (unsigned, structurally valid) OCSP response.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        # 0 is successful; anything else is a responder error carrying no data.
+        [int] $ResponseStatus = 0,
+
+        [ValidateSet('Good', 'Revoked', 'Unknown')]
+        [string] $CertificateStatus = 'Good',
+
+        [datetime] $ProducedAt = [datetime]::UtcNow.AddHours(-2),
+
+        [datetime] $ThisUpdate = [datetime]::UtcNow.AddHours(-3),
+
+        [Nullable[datetime]] $NextUpdate = [datetime]::UtcNow.AddDays(4),
+
+        [switch] $WithVersion
+    )
+
+    $status = ConvertTo-TestDer -Tag 0x0A -Content ([byte[]]@($ResponseStatus))
+    if ($ResponseStatus -ne 0) {
+        return , (ConvertTo-TestDer -Tag 0x30 -Content $status)
+    }
+
+    switch ($CertificateStatus) {
+        'Good' { $certStatus = ConvertTo-TestDer -Tag 0x80 }
+        'Revoked' { $certStatus = ConvertTo-TestDer -Tag 0xA1 -Content (ConvertTo-TestDerTime -Value $ThisUpdate -Generalized) }
+        'Unknown' { $certStatus = ConvertTo-TestDer -Tag 0x82 }
+    }
+
+    $single = [byte[]]((ConvertTo-TestDer -Tag 0x30) + $certStatus + (ConvertTo-TestDerTime -Value $ThisUpdate -Generalized))
+    if ($null -ne $NextUpdate) {
+        $single = [byte[]]($single + (ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDerTime -Value $NextUpdate -Generalized)))
+    }
+    $responses = ConvertTo-TestDer -Tag 0x30 -Content (ConvertTo-TestDer -Tag 0x30 -Content $single)
+
+    $tbsContent = [byte[]]@()
+    if ($WithVersion) {
+        $tbsContent = [byte[]](ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDer -Tag 0x02 -Content ([byte[]]@(0))))
+    }
+    $responderId = ConvertTo-TestDer -Tag 0xA1 -Content (ConvertTo-TestDer -Tag 0x30)
+    $tbsContent = [byte[]]($tbsContent + $responderId + (ConvertTo-TestDerTime -Value $ProducedAt -Generalized) + $responses)
+
+    $algorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, 0x05, 0x00))
+    $signature = ConvertTo-TestDer -Tag 0x03 -Content ([byte[]](0x00, 0x01, 0x02, 0x03))
+    $basic = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x30 -Content $tbsContent) + $algorithm + $signature))
+
+    $basicOid = ConvertTo-TestDer -Tag 0x06 -Content ([byte[]](0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x01))
+    $responseBytes = ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]($basicOid + (ConvertTo-TestDer -Tag 0x04 -Content $basic))))
+    ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]($status + $responseBytes))
+}
+
+function Start-TestHttpServer {
+    <#
+    .SYNOPSIS
+        Starts a real HTTP server on a free loopback port, answering a few fixed paths from a
+        background runspace, so that the module's HTTP client can be tested without mocks.
+    .DESCRIPTION
+        /ok returns five bytes; /echo returns "METHOD|content type|cache-control|" followed by
+        the request body; /missing returns 404; /big returns 5000 bytes; /slow answers after
+        four seconds.
+    #>
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper bound to the loopback interface.')]
+    param()
+
+    $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $probe.Start()
+    $port = $probe.LocalEndpoint.Port
+    $probe.Stop()
+
+    $prefix = "http://localhost:$port/"
+    $listener = [System.Net.HttpListener]::new()
+    $listener.Prefixes.Add($prefix)
+    $listener.Start()
+
+    $shell = [powershell]::Create()
+    $null = $shell.AddScript({
+            param($listener)
+            while ($listener.IsListening) {
+                try { $context = $listener.GetContext() } catch { break }
+                $response = $context.Response
+                try {
+                    switch ($context.Request.Url.AbsolutePath) {
+                        '/ok' { $response.OutputStream.Write([byte[]](1, 2, 3, 4, 5), 0, 5) }
+                        '/echo' {
+                            $body = [System.IO.MemoryStream]::new()
+                            $context.Request.InputStream.CopyTo($body)
+                            $head = [System.Text.Encoding]::ASCII.GetBytes("$($context.Request.HttpMethod)|$($context.Request.ContentType)|$($context.Request.Headers['Cache-Control'])|")
+                            $response.OutputStream.Write($head, 0, $head.Length)
+                            $response.OutputStream.Write($body.ToArray(), 0, [int]$body.Length)
+                        }
+                        '/missing' { $response.StatusCode = 404 }
+                        '/big' { $response.OutputStream.Write((New-Object byte[] 5000), 0, 5000) }
+                        '/slow' {
+                            Start-Sleep -Seconds 4
+                            $response.OutputStream.Write([byte[]](1), 0, 1)
+                        }
+                        default { $response.StatusCode = 400 }
+                    }
+                } catch {
+                    $null = $_
+                } finally {
+                    try { $response.Close() } catch { $null = $_ }
+                }
+            }
+        }).AddArgument($listener)
+
+    [PSCustomObject]@{
+        Prefix   = $prefix
+        Listener = $listener
+        Shell    = $shell
+        Handle   = $shell.BeginInvoke()
+    }
+}
+
+function Stop-TestHttpServer {
+    <#
+    .SYNOPSIS
+        Stops a server started with Start-TestHttpServer.
+    #>
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper.')]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject] $Server
+    )
+
+    try { $Server.Listener.Stop() } catch { $null = $_ }
+    try { $Server.Shell.Stop() } catch { $null = $_ }
+    $Server.Listener.Close()
+    $Server.Shell.Dispose()
+}
+
 function Get-TestScriptedConnection {
     <#
     .SYNOPSIS

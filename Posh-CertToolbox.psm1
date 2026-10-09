@@ -35,6 +35,10 @@ $script:CertToolboxStartTlsDefaultPort = @{
 # server cannot keep a STARTTLS exchange reading forever.
 $script:CertToolboxStartTlsMaxReplyLine = 200
 
+# Largest CRL, OCSP response or issuer certificate downloaded by the certificate URL tests. CRLs
+# of a few megabytes are common; this stops one oversized file from stalling a batch.
+$script:CertToolboxMaxDownloadBytes = 20MB
+
 foreach ($layer in Get-ChildItem -Path (Join-Path $script:ModuleRoot 'Private') -Filter '*.ps1' -Recurse -File -ErrorAction SilentlyContinue) {
     . $layer.FullName
 }

@@ -10,7 +10,7 @@ A PowerShell toolbox to troubleshoot TLS and certificates. No dependencies: it r
 | `Test-CertToolboxTlsProtocol` | Which TLS versions (SSL 3.0 to TLS 1.3) can be negotiated with an endpoint |
 | `Get-CertToolboxCaaRecord` | Which CAs the DNS CAA records allow to issue for a domain |
 
-Both TLS cmdlets also reach mail servers that upgrade from plaintext, with `-StartTls Smtp`, `Imap` or `Pop3`.
+Both TLS cmdlets also reach mail servers that upgrade from plaintext, with `-StartTls Smtp`, `Imap` or `Pop3`. `Get-CertToolboxTlsCertificate -TestCertificateUrl` also tests the CRL, OCSP and issuer URLs of every certificate of both chains.
 
 ## Install
 
@@ -35,6 +35,9 @@ Test-CertToolboxTlsProtocol www.example.com | Format-Table Protocol, Negotiated,
 # A mail server, upgrading with STARTTLS
 Get-CertToolboxTlsCertificate mail.example.com -Port 587 -StartTls Smtp
 
+# CRL, OCSP and issuer URLs of every certificate of both chains
+(Get-CertToolboxTlsCertificate www.example.com -TestCertificateUrl).UrlTest | Format-Table Chain, Type, Result, Url
+
 # CAs allowed to issue
 Get-CertToolboxCaaRecord www.example.com
 ```
@@ -46,9 +49,10 @@ Get-CertToolboxCaaRecord www.example.com
 - **An invalid certificate never fails the call.** It is reported in `ValidationPassed`, `PolicyError` and `ChainStatus`, so broken endpoints can be inspected.
 - **The handshake is done by the operating system's TLS stack.** A version that could not be negotiated may be disabled on your machine rather than on the server; `ErrorMessage` tells the two apart.
 - **`CipherSuite` needs PowerShell 7.** Windows PowerShell 5.1 reports the cipher algorithm and strength only.
+- **`-TestCertificateUrl` diagnoses, it does not decide trust.** It reads CRLs and OCSP answers without verifying their signatures; `-CheckRevocation` gives the operating system's verdict.
 - **CAA lookups go through Google DNS-over-HTTPS** (`dns.google`): the names you query are sent to that service.
 - **Logging is off by default.** Copy `Config\Posh-CertToolbox.sample.json` to `$home\Posh-CertToolbox\Posh-CertToolbox-Config.json` and set `Logging.Enabled` to turn it on.
-- **Tested on Windows only so far**, under Windows PowerShell 5.1 and PowerShell 7. Linux and macOS are supported by design but not yet verified.
+- **Tested on Windows** (Windows PowerShell 5.1 and PowerShell 7) **and on Linux and macOS** (PowerShell 7).
 
 ## Tests
 
@@ -59,6 +63,7 @@ Invoke-Pester -Path .\Tests                                 # also real endpoint
 
 ## Change log
 
+- **0.5.0** — CRL, OCSP and CA Issuers URL tests on both chains (`-TestCertificateUrl`).
 - **0.4.0** — README, HowTo and generated help files.
 - **0.3.0** — STARTTLS for SMTP, IMAP and POP3.
 - **0.2.0** — Opt-in logging, driven by a JSON config file.

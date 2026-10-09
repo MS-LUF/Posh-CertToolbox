@@ -19,7 +19,7 @@ function Invoke-CertToolboxTlsHandshake {
         - the chain the local machine built and each element's status;
         - the policy errors the runtime itself concluded.
 
-        Not verified on Linux or macOS.
+        Also used successfully under PowerShell 7 on Linux and macOS.
     .PARAMETER Stream
         A connected stream to the server. It is closed when this function returns or throws.
     .PARAMETER TargetHost

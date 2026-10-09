@@ -2,7 +2,7 @@
 Module Name: Posh-CertToolbox
 Module Guid: b7e4c1a2-5f3d-4e8a-9c6b-2d1f0a7e8c34
 Download Help Link:
-Help Version: 0.4.0.0
+Help Version: 0.5.0.0
 Locale: en-US
 ---
 

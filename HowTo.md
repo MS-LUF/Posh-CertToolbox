@@ -15,6 +15,7 @@ certificates will differ when you run them.
 9. [Finding which CAs may issue for a domain](#9-finding-which-cas-may-issue-for-a-domain)
 10. [Checking many endpoints at once](#10-checking-many-endpoints-at-once)
 11. [Enabling logging](#11-enabling-logging)
+12. [Testing the CRL, OCSP and issuer URLs of a chain](#12-testing-the-crl-ocsp-and-issuer-urls-of-a-chain)
 
 ```powershell
 Import-Module .\Posh-CertToolbox.psd1
@@ -515,3 +516,159 @@ What a session looks like at `Debug` level:
   you get one warning for the session and the cmdlet carries on without logging.
 - `EventLog` mode needs Windows PowerShell 5.1. The first use has to run elevated, to register
   the event source. On other platforms it is skipped with one warning.
+
+---
+
+## 12. Testing the CRL, OCSP and issuer URLs of a chain
+
+A certificate points at the services that vouch for it: the CRL where its revocation would be
+published, the OCSP responder that answers for it, and the URL of its issuer's certificate (CA
+Issuers). `-TestCertificateUrl` requests every one of them, for every certificate of both
+chains, and puts the outcome in `UrlTest`:
+
+```powershell
+$r = Get-CertToolboxTlsCertificate 'www.microsoft.com' -TestCertificateUrl
+$r.UrlTest | Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result, NextUpdate, ElapsedMs
+```
+
+```
+Subject                            Chain Type      Result      NextUpdate            ElapsedMs
+-------                            ----- ----      ------      ----------            ---------
+CN=www.microsoft.com               Both  Crl       NotRevoked  10/17/2026 2:33:08 PM       117
+CN=www.microsoft.com               Both  Crl       NotRevoked  10/17/2026 2:33:08 PM        89
+CN=www.microsoft.com               Both  Ocsp      Good        10/14/2026 4:43:23 AM       192
+CN=www.microsoft.com               Both  CaIssuers IssuerMatch                              40
+CN=www.microsoft.com               Both  CaIssuers IssuerMatch                              54
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  12/31/2026 6:57:33 AM        39
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  12/31/2026 6:57:33 AM        54
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Ocsp      Good        10/13/2026 8:55:12 PM       182
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                              37
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                              44
+CN=Microsoft TLS RSA Root G2       Both  Crl       NotRevoked  10/23/2026 5:42:07 PM        41
+CN=Microsoft TLS RSA Root G2       Both  Ocsp      Good        10/15/2026 6:31:02 PM        43
+CN=Microsoft TLS RSA Root G2       Both  CaIssuers IssuerMatch                              31
+```
+
+One row per certificate and URL. A certificate that lists two CRL URLs gets two rows. The root
+has no such URL and no row. Each row has more than the table shows:
+
+```powershell
+$r.UrlTest | Where-Object Type -eq 'Ocsp' | Select-Object -First 1 | Format-List
+```
+
+```
+Subject    : CN=www.microsoft.com, O=Microsoft Corporation, L=Redmond, S=WA, C=US
+Thumbprint : ADA5F27D8ECEC5416F5FE19043310DDD305C024B
+Chain      : Both
+Type       : Ocsp
+Url        : http://oneocsp.microsoft.com/ocsp
+Result     : Good
+Reachable  : True
+ThisUpdate : 10/7/2026 4:43:23 AM
+NextUpdate : 10/14/2026 4:43:23 AM
+Detail     : Response produced at 2026-10-07 04:43:23Z
+ElapsedMs  : 192
+```
+
+| `Type` | `Result` | Meaning |
+|---|---|---|
+| `Crl` | `NotRevoked` | The CRL was read, is current, and does not list the certificate |
+| `Crl` | `Revoked` | The CRL lists the certificate |
+| `Crl` | `CrlExpired` | The certificate is not listed, but the CRL is past its next update, so it proves nothing |
+| `Ocsp` | `Good`, `Revoked`, `Unknown` | What the responder answered for the certificate |
+| `Ocsp` | `ResponderError` | The responder refused the request; `Detail` says how |
+| `CaIssuers` | `IssuerMatch` | The URL returns the issuer's certificate |
+| `CaIssuers` | `IssuerMismatch` | It returns a certificate, but not the issuer's |
+| `CaIssuers` | `NotACertificate` | It returns something else, an error page for instance |
+| any | `Failed` | No usable answer: unreachable, HTTP error, timeout, or unreadable content. `Detail` has the error |
+| any | `Skipped` | Not testable, with the reason in `Detail`: an `ldap://` URL, or an OCSP test whose issuer certificate is in neither chain |
+
+`ThisUpdate` and `NextUpdate` are those of the CRL or of the OCSP answer, in UTC. `Reachable`
+tells a server that answered with something wrong (`True`) from one that did not answer
+(`False`).
+
+**`Chain`** says where the certificate comes from: `Server` (only in what the server sent),
+`Local` (only in the chain this machine built) or `Both`. A certificate in both is tested once.
+With a server that sends only its leaf, the intermediates appear as `Local`:
+
+```powershell
+(Get-CertToolboxTlsCertificate 'incomplete-chain.badssl.com' -TestCertificateUrl).UrlTest |
+    Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result
+```
+
+```
+Subject         Chain Type      Result
+-------         ----- ----      ------
+CN=*.badssl.com Both  Crl       NotRevoked
+CN=*.badssl.com Both  CaIssuers IssuerMatch
+CN=YR1          Local Crl       NotRevoked
+CN=YR1          Local CaIssuers IssuerMatch
+CN=Root YR      Local Crl       NotRevoked
+CN=Root YR      Local CaIssuers IssuerMatch
+```
+
+Those certificates carry no OCSP URL, so there is no `Ocsp` row: several public CAs no longer
+run OCSP for their certificates and publish CRLs only. A missing type is not an error.
+
+**A revoked certificate.** This is also where the difference with `ValidationPassed` shows:
+
+```powershell
+$r = Get-CertToolboxTlsCertificate 'revoked.badssl.com' -TestCertificateUrl
+$r | Format-List ValidationPassed, RevocationMode
+$r.UrlTest | Where-Object Result -notin 'NotRevoked', 'Good', 'IssuerMatch' |
+    Format-List Subject, Chain, Type, Url, Result, NextUpdate, Detail
+```
+
+```
+ValidationPassed : True
+RevocationMode   : NoCheck
+
+Subject    : CN=revoked.badssl.com
+Chain      : Both
+Type       : Crl
+Url        : http://ye2.c.lencr.org/74.crl
+Result     : Revoked
+NextUpdate : 10/18/2026 5:35:52 PM
+Detail     : 1541 revoked certificate(s) listed
+```
+
+`ValidationPassed` is the operating system's verdict, and it did not check revocation because
+`-CheckRevocation` was not used (section 5). The URL test read the CRL itself and found the
+certificate in it. The two answer different questions and can be combined:
+
+- `-CheckRevocation`: does this machine consider the chain revoked? A trusted answer, but it
+  says little when the check cannot be made.
+- `-TestCertificateUrl`: does each revocation and issuer service answer, and what does it say?
+  It shows *which* URL is down, stale or wrong.
+
+**Only the problems, across several endpoints:**
+
+```powershell
+'www.google.com', 'www.microsoft.com', 'revoked.badssl.com' |
+    Get-CertToolboxTlsCertificate -TestCertificateUrl |
+    ForEach-Object {
+        $name = $_.HostName
+        $_.UrlTest | Where-Object Result -notin 'NotRevoked', 'Good', 'IssuerMatch', 'Skipped' |
+            Select-Object @{ n = 'HostName'; e = { $name } }, Type, Result, Url
+    } | Format-Table
+```
+
+```
+HostName           Type Result  Url
+--------           ---- ------  ---
+revoked.badssl.com Crl  Revoked http://ye2.c.lencr.org/74.crl
+```
+
+Things to know:
+
+- **The tests do not verify signatures.** A CRL or an OCSP answer is read as received. This is
+  a diagnosis of the infrastructure, not a trust decision; for that, use `-CheckRevocation`.
+- **They contact the certificate authorities' servers**, over plain HTTP because that is what
+  the URLs in certificates use. An OCSP request tells the CA which certificate you asked about.
+- **`UrlTest` is empty when the switch is not used.** With the switch it is a list, which can
+  itself be empty when no certificate carries a URL.
+- **`-TimeoutSec` applies to each request.** A URL shared by several certificates is requested
+  once. A download larger than 20 MB is given up and reported as `Failed`.
+- **A failing URL never fails the cmdlet.** It is a row with `Failed`.
+- With logging on, each call writes one line with the number of tests and the URLs that had a
+  problem.

@@ -151,6 +151,59 @@ Describe 'Get-CertToolboxTlsCertificate' -Tag Unit {
         }
     }
 
+    Context 'TestCertificateUrl' {
+        BeforeEach {
+            $script:probeResult = Get-TestTlsProbeResult `
+                -ServerCertificate $script:chain.Leaf `
+                -LocalCertificate $script:chain.Leaf, $script:chain.Intermediate, $script:chain.Root
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe { $script:probeResult }
+
+            $script:urlRows = @(
+                [PSCustomObject]@{ Type = 'Crl'; Url = 'http://crl.test.example/ca.crl'; Result = 'NotRevoked' }
+                [PSCustomObject]@{ Type = 'Ocsp'; Url = 'http://ocsp.test.example/'; Result = 'Revoked' }
+                [PSCustomObject]@{ Type = 'CaIssuers'; Url = 'ldap://directory.test.example/'; Result = 'Skipped' }
+            )
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest { $script:urlRows }
+        }
+
+        It 'does not test any URL and leaves UrlTest empty by default' {
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example'
+
+            $result.PSObject.Properties['UrlTest'] | Should -Not -BeNullOrEmpty
+            $result.UrlTest | Should -BeNullOrEmpty
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest -Times 0 -Exactly
+        }
+
+        It 'tests both chains with the cmdlet timeout and returns the rows' {
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example' -TestCertificateUrl -TimeoutSec 4
+
+            @($result.UrlTest).Count | Should -Be 3
+            ($result.UrlTest.Result -join ',') | Should -Be 'NotRevoked,Revoked,Skipped'
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest -Times 1 -Exactly -ParameterFilter {
+                $ServerCertificate.Count -eq 1 -and $LocalCertificate.Count -eq 3 -and $TimeoutSec -eq 4 -and
+                $ServerCertificate[0].Thumbprint -eq $script:chain.Leaf.Thumbprint
+            }
+        }
+
+        It 'returns an empty list, not nothing, when the tests ran but found no URL' {
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest { }
+
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example' -TestCertificateUrl
+
+            , $result.UrlTest | Should -BeOfType [array]
+            @($result.UrlTest).Count | Should -Be 0
+        }
+
+        It 'logs a summary naming the URLs with a problem, and only those' {
+            Get-CertToolboxTlsCertificate -HostName 'test.example' -TestCertificateUrl | Out-Null
+
+            Should -Invoke -ModuleName Posh-CertToolbox Write-CertToolboxLog -Times 1 -Exactly -ParameterFilter {
+                $Level -eq 'Information' -and $Target -eq 'test.example:443' -and
+                $Message -eq 'Certificate URL tests: 3 run, 1 with a problem: Ocsp http://ocsp.test.example/ -> Revoked.'
+            }
+        }
+    }
+
     Context 'chain problems' {
         It 'reports an intermediate the server did not send' {
             $script:probeResult = Get-TestTlsProbeResult -ServerCertificate $script:chain.Leaf `
@@ -265,6 +318,34 @@ Describe 'Get-CertToolboxTlsCertificate against real endpoints' -Tag Integration
         $errors = @($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
         $errors.Count | Should -Be 1
         $errors[0].FullyQualifiedErrorId | Should -BeLike 'TlsConnectionFailed*'
+    }
+
+    # Real CA infrastructure: checks the hand-written CRL and OCSP code against real answers.
+    It 'gets Good from a real OCSP responder and reads real CRLs and issuer certificates' {
+        $result = Get-CertToolboxTlsCertificate -HostName 'www.microsoft.com' -TestCertificateUrl
+
+        $rows = @($result.UrlTest)
+        @($rows | Where-Object { $_.Type -eq 'Ocsp' -and $_.Result -eq 'Good' }).Count | Should -BeGreaterThan 0
+        @($rows | Where-Object { $_.Type -eq 'Crl' -and $_.Result -eq 'NotRevoked' -and $_.NextUpdate -gt [datetime]::UtcNow }).Count | Should -BeGreaterThan 0
+        @($rows | Where-Object { $_.Type -eq 'CaIssuers' -and $_.Result -eq 'IssuerMatch' }).Count | Should -BeGreaterThan 0
+        @($rows | Where-Object { $_.Subject -eq $result.Certificate.Subject -and $_.Result -in 'Revoked', 'Failed' }) | Should -BeNullOrEmpty
+    }
+
+    It 'finds a revoked certificate in its real CRL' {
+        $result = Get-CertToolboxTlsCertificate -HostName 'revoked.badssl.com' -TestCertificateUrl
+
+        $leafCrl = @($result.UrlTest | Where-Object { $_.Type -eq 'Crl' -and $_.Thumbprint -eq $result.Certificate.Thumbprint })
+        $leafCrl.Count | Should -BeGreaterThan 0
+        $leafCrl[0].Result | Should -Be 'Revoked'
+    }
+
+    It 'tests the certificates only the local chain has, when the server sent just its leaf' {
+        $result = Get-CertToolboxTlsCertificate -HostName 'incomplete-chain.badssl.com' -TestCertificateUrl
+
+        if (@($result.LocalChain).Count -gt 1) {
+            @($result.UrlTest | Where-Object Chain -eq 'Local').Count | Should -BeGreaterThan 0
+        }
+        @($result.UrlTest | Where-Object Chain -eq 'Both').Count | Should -BeGreaterThan 0
     }
 
     It 'reports a name mismatch' {

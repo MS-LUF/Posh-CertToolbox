@@ -134,6 +134,8 @@
       <maml:para>The connection is never refused because of the certificate: validation problems are reported in ValidationPassed, PolicyError and ChainStatus instead, so that broken endpoints can be inspected.</maml:para>
       <maml:para>The handshake is done by the operating system's TLS stack. The protocol versions and cipher suites that can be offered therefore depend on the machine this runs on, and CipherSuite is only available under PowerShell 7 and later.</maml:para>
       <maml:para>Mail servers that start in plaintext and upgrade to TLS are reached with the StartTls parameter: the cmdlet speaks just enough SMTP, IMAP or POP3 to check that the server offers the upgrade and to request it, then does the same handshake. Use the Verbose switch to see that dialogue.</maml:para>
+      <maml:para>With the TestCertificateUrl switch, every CRL, OCSP and issuer-certificate (CA Issuers) URL found in the certificates of both chains is requested, and the UrlTest property lists one result per certificate and URL: whether it answered, the dates it gave, and a Result. For a CRL the Result is NotRevoked, Revoked or CrlExpired; for OCSP it is Good, Revoked, Unknown or ResponderError; for CA Issuers it is IssuerMatch, IssuerMismatch or NotACertificate; and for any of them Failed (no usable answer) or Skipped (not testable, with the reason in Detail).</maml:para>
+      <maml:para>These tests show whether the revocation and issuer infrastructure answers and what it says. They do not verify the signature of a CRL or of an OCSP response, so they are a diagnosis and not a trust decision; CheckRevocation gives the operating system's own verdict. They contact the certificate authorities' servers, over plain HTTP as those URLs require.</maml:para>
     </maml:description>
     <command:syntax>
       <command:syntaxItem>
@@ -232,6 +234,17 @@
             <maml:uri />
           </dev:type>
           <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>TestCertificateUrl</maml:name>
+          <maml:description>
+            <maml:para>Also requests every CRL, OCSP and CA Issuers URL found in the certificates of both chains, and reports the outcome in the UrlTest property. TimeoutSec applies to each request.</maml:para>
+          </maml:description>
+          <dev:type>
+            <maml:name>SwitchParameter</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>False</dev:defaultValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -332,6 +345,18 @@
         </dev:type>
         <dev:defaultValue>None</dev:defaultValue>
       </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>TestCertificateUrl</maml:name>
+        <maml:description>
+          <maml:para>Also requests every CRL, OCSP and CA Issuers URL found in the certificates of both chains, and reports the outcome in the UrlTest property. TimeoutSec applies to each request.</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
+        <dev:type>
+          <maml:name>SwitchParameter</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>False</dev:defaultValue>
+      </command:parameter>
     </command:parameters>
     <command:inputTypes>
       <command:inputType>
@@ -385,6 +410,13 @@
         <dev:code>Get-CertToolboxTlsCertificate -HostName 'mail.example.com' -Port 587 -StartTls Smtp -Verbose</dev:code>
         <dev:remarks>
           <maml:para>Inspects the certificate of a mail submission server, showing the SMTP dialogue.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 5 --------------------------</maml:title>
+        <dev:code>(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, NextUpdate, Url</dev:code>
+        <dev:remarks>
+          <maml:para>Tests the CRL, OCSP and CA Issuers URLs of every certificate of both chains.</maml:para>
         </dev:remarks>
       </command:example>
     </command:examples>

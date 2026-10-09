@@ -17,7 +17,7 @@ Describe 'Comment-based help' -Tag Unit {
         It 'has at least the expected number of functions to check (sanity check on discovery itself)' {
             # Guards against this test silently checking nothing if the Get-ChildItem above ever
             # stops finding files - a real minimum, not a moving target.
-            $script:allFunctionNames.Count | Should -BeGreaterOrEqual 31
+            $script:allFunctionNames.Count | Should -BeGreaterOrEqual 41
         }
 
         It 'every function is defined in a file of the same name' {

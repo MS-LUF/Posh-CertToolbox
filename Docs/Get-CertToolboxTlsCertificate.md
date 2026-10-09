@@ -16,7 +16,7 @@ server sent, and the chain this machine builds from it.
 ```
 Get-CertToolboxTlsCertificate [-HostName] <String[]> [-Port <Int32>] [-TargetHost <String>]
  [-Protocol <String[]>] [-TimeoutSec <Int32>] [-CheckRevocation] [-StartTls <String>] [-SmtpEhloName <String>]
- [<CommonParameters>]
+ [-TestCertificateUrl] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -56,6 +56,23 @@ offers the upgrade and to request it, then does the same handshake.
 Use the Verbose
 switch to see that dialogue.
 
+With the TestCertificateUrl switch, every CRL, OCSP and issuer-certificate (CA Issuers)
+URL found in the certificates of both chains is requested, and the UrlTest property
+lists one result per certificate and URL: whether it answered, the dates it gave, and
+a Result.
+For a CRL the Result is NotRevoked, Revoked or CrlExpired; for OCSP it is
+Good, Revoked, Unknown or ResponderError; for CA Issuers it is IssuerMatch,
+IssuerMismatch or NotACertificate; and for any of them Failed (no usable answer) or
+Skipped (not testable, with the reason in Detail).
+
+These tests show whether the revocation and issuer infrastructure answers and what it
+says.
+They do not verify the signature of a CRL or of an OCSP response, so they are a
+diagnosis and not a trust decision; CheckRevocation gives the operating system's own
+verdict.
+They contact the certificate authorities' servers, over plain HTTP as those
+URLs require.
+
 ## EXAMPLES
 
 ### EXAMPLE 1
@@ -83,6 +100,13 @@ Get-CertToolboxTlsCertificate -HostName 'mail.example.com' -Port 587 -StartTls S
 ```
 
 Inspects the certificate of a mail submission server, showing the SMTP dialogue.
+
+### EXAMPLE 5
+```
+(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, NextUpdate, Url
+```
+
+Tests the CRL, OCSP and CA Issuers URLs of every certificate of both chains.
 
 ## PARAMETERS
 
@@ -212,6 +236,24 @@ Aliases:
 Required: False
 Position: Named
 Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -TestCertificateUrl
+Also requests every CRL, OCSP and CA Issuers URL found in the certificates of both
+chains, and reports the outcome in the UrlTest property.
+TimeoutSec applies to each
+request.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

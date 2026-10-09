@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Posh-CertToolbox.psm1'
-    ModuleVersion     = '0.4.0'
+    ModuleVersion     = '0.5.0'
     GUID              = 'b7e4c1a2-5f3d-4e8a-9c6b-2d1f0a7e8c34'
     Author            = 'MS-LUF'
     CompanyName       = 'lucas-cueff.com'
@@ -20,7 +20,7 @@
         PSData = @{
             Tags         = @('TLS', 'SSL', 'X509', 'Certificate', 'CAA', 'DNS', 'Security', 'Troubleshooting')
             LicenseUri   = 'https://opensource.org/licenses/artistic-license-2.0'
-            ReleaseNotes = 'v0.4.0 - README, HowTo and generated help files. See the change log in README.md.'
+            ReleaseNotes = 'v0.5.0 - CRL, OCSP and CA Issuers URL tests on both chains (-TestCertificateUrl). See the change log in README.md.'
         }
     }
 }
