@@ -120,20 +120,34 @@ function Get-TestCertificateWithUrl {
 
         [string[]] $CaIssuersUrl = @(),
 
-        [byte[]] $SerialNumber = @(0x0A, 0x0B, 0x0C, 0x0D)
+        [byte[]] $SerialNumber = @(0x0A, 0x0B, 0x0C, 0x0D),
+
+        [ValidateSet('Rsa', 'Ecdsa')]
+        [string] $IssuerKeyType = 'Rsa'
     )
 
     $sha256 = [System.Security.Cryptography.HashAlgorithmName]::SHA256
     $padding = [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
     $now = [System.DateTimeOffset]::UtcNow
 
-    $caKey = [System.Security.Cryptography.RSA]::Create(2048)
-    $caRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=CertToolbox Url Test CA', $caKey, $sha256, $padding)
+    if ($IssuerKeyType -eq 'Ecdsa') {
+        $caKey = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve+NamedCurves]::nistP256)
+        $caRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=CertToolbox Url Test CA', $caKey, $sha256)
+    } else {
+        $caKey = [System.Security.Cryptography.RSA]::Create(2048)
+        $caRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=CertToolbox Url Test CA', $caKey, $sha256, $padding)
+    }
     $caRequest.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true, $false, 0, $true))
     $ca = $caRequest.CreateSelfSigned($now.AddDays(-2), $now.AddDays(60))
 
-    $leafKey = [System.Security.Cryptography.RSA]::Create(2048)
-    $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=url.test.example', $leafKey, $sha256, $padding)
+    # The simple issuing call requires the leaf key to be of the same kind as the issuer's.
+    if ($IssuerKeyType -eq 'Ecdsa') {
+        $leafKey = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve+NamedCurves]::nistP256)
+        $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=url.test.example', $leafKey, $sha256)
+    } else {
+        $leafKey = [System.Security.Cryptography.RSA]::Create(2048)
+        $leafRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=url.test.example', $leafKey, $sha256, $padding)
+    }
 
     if ($CrlUrl.Count -gt 0) {
         # SEQUENCE OF DistributionPoint { distributionPoint [0] { fullName [0] { URI [6] } } }
@@ -164,19 +178,131 @@ function Get-TestCertificateWithUrl {
     $leaf = $leafRequest.Create($ca, $now.AddDays(-1), $now.AddDays(30), $SerialNumber)
 
     [PSCustomObject]@{
-        Issuer = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$ca.RawData)
-        Leaf   = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$leaf.RawData)
+        Issuer        = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$ca.RawData)
+        Leaf          = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$leaf.RawData)
+        # For signing test CRLs and OCSP responses, and for issuing a responder certificate.
+        IssuerKey     = $caKey
+        IssuerWithKey = $ca
+    }
+}
+
+function ConvertTo-TestSignature {
+    <#
+    .SYNOPSIS
+        Signs data with an RSA or ECDSA key and returns the two DER elements a signed structure
+        ends with: the algorithm identifier and the signature BIT STRING.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [byte[]] $Data,
+
+        # Without a key, a placeholder that verifies against nothing.
+        [object] $Key,
+
+        [switch] $Corrupt
+    )
+
+    $sha256 = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+    if ($Key -is [System.Security.Cryptography.ECDsa]) {
+        $algorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02))
+        # SignData returns r || s at a fixed width; a signed structure stores SEQUENCE { r, s }.
+        $raw = $Key.SignData([byte[]]$Data, $sha256)
+        $half = [int]($raw.Length / 2)
+        $signature = [byte[]]@()
+        foreach ($start in 0, $half) {
+            $value = New-Object System.Collections.Generic.List[byte]
+            $value.AddRange([byte[]]$raw[$start..($start + $half - 1)])
+            while ($value.Count -gt 1 -and $value[0] -eq 0) { $value.RemoveAt(0) }
+            if ($value[0] -ge 0x80) { $value.Insert(0, 0) }
+            $signature = [byte[]]($signature + (ConvertTo-TestDer -Tag 0x02 -Content $value.ToArray()))
+        }
+        $signature = ConvertTo-TestDer -Tag 0x30 -Content $signature
+    } else {
+        $algorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, 0x05, 0x00))
+        if ($Key) {
+            $signature = $Key.SignData([byte[]]$Data, $sha256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        } else {
+            $signature = [byte[]](0x01, 0x02, 0x03)
+        }
+    }
+
+    if ($Corrupt) {
+        $signature[$signature.Length - 1] = $signature[$signature.Length - 1] -bxor 0xFF
+    }
+
+    [PSCustomObject]@{
+        Algorithm = $algorithm
+        Signature = ConvertTo-TestDer -Tag 0x03 -Content ([byte[]](@(0x00) + $signature))
+    }
+}
+
+function Get-TestOcspResponder {
+    <#
+    .SYNOPSIS
+        Builds a delegated OCSP responder certificate and its key.
+    .DESCRIPTION
+        By default it is issued by the given CA, marked for OCSP signing and currently valid.
+        The switches each break one of those properties.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2] $IssuerWithKey,
+
+        [switch] $WithoutOcspSigningUsage,
+
+        [switch] $Expired,
+
+        [switch] $SelfSigned
+    )
+
+    $sha256 = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+    $now = [System.DateTimeOffset]::UtcNow
+    $key = [System.Security.Cryptography.RSA]::Create(2048)
+    $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+        'CN=CertToolbox Test OCSP Responder', $key, $sha256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+
+    if (-not $WithoutOcspSigningUsage) {
+        $usage = [System.Security.Cryptography.OidCollection]::new()
+        $null = $usage.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.9'))
+        $request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($usage, $false))
+    }
+
+    $notAfter = $now.AddDays(10)
+    if ($Expired) {
+        $notAfter = $now.AddHours(-2)
+    }
+
+    if ($SelfSigned) {
+        $certificate = $request.CreateSelfSigned($now.AddDays(-1), $notAfter)
+    } else {
+        $certificate = $request.Create($IssuerWithKey, $now.AddDays(-1), $notAfter, [byte[]](0x51, 0x52, 0x53))
+    }
+
+    [PSCustomObject]@{
+        Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$certificate.RawData)
+        Key         = $key
     }
 }
 
 function Get-TestCrl {
     <#
     .SYNOPSIS
-        Builds the bytes of a (unsigned, structurally valid) certificate revocation list.
+        Builds the bytes of a structurally valid certificate revocation list, really signed
+        when a key is given.
     #>
     [CmdletBinding()]
     [OutputType([byte[]], [System.Array], [System.Object[]])]
     param(
+        # The DER-encoded name of the CRL's issuer. An empty name by default.
+        [byte[]] $IssuerName,
+
+        # RSA or ECDSA key to sign with. Without one the signature is a placeholder.
+        [object] $SignerKey,
+
+        [switch] $CorruptSignature,
+
         [datetime] $ThisUpdate = [datetime]::UtcNow.AddDays(-1),
 
         [Nullable[datetime]] $NextUpdate = [datetime]::UtcNow.AddDays(6),
@@ -214,7 +340,11 @@ function Get-TestCrl {
         $parts += , (ConvertTo-TestDer -Tag 0x02 -Content ([byte[]]@(1)))
     }
     $parts += , $algorithm
-    $parts += , (ConvertTo-TestDer -Tag 0x30)
+    if ($IssuerName) {
+        $parts += , $IssuerName
+    } else {
+        $parts += , (ConvertTo-TestDer -Tag 0x30)
+    }
     $parts += , (ConvertTo-TestDerTime -Value $ThisUpdate)
     if ($null -ne $NextUpdate) {
         $parts += , (ConvertTo-TestDerTime -Value $NextUpdate -Generalized:$GeneralizedNextUpdate)
@@ -226,8 +356,9 @@ function Get-TestCrl {
         $tbs.Write($part, 0, $part.Length)
     }
 
-    $signature = ConvertTo-TestDer -Tag 0x03 -Content ([byte[]](0x00, 0x01, 0x02, 0x03))
-    $crl = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x30 -Content $tbs.ToArray()) + $algorithm + $signature))
+    $tbsElement = ConvertTo-TestDer -Tag 0x30 -Content $tbs.ToArray()
+    $signed = ConvertTo-TestSignature -Data $tbsElement -Key $SignerKey -Corrupt:$CorruptSignature
+    $crl = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]($tbsElement + $signed.Algorithm + $signed.Signature))
 
     if ($AsPem) {
         $text = "-----BEGIN X509 CRL-----`n" + [System.Convert]::ToBase64String($crl, 'InsertLineBreaks') + "`n-----END X509 CRL-----`n"
@@ -239,11 +370,29 @@ function Get-TestCrl {
 function Get-TestOcspResponse {
     <#
     .SYNOPSIS
-        Builds the bytes of a (unsigned, structurally valid) OCSP response.
+        Builds the bytes of a structurally valid OCSP response, really signed when a key is
+        given and identifying a certificate when one is given.
     #>
     [CmdletBinding()]
     [OutputType([byte[]], [System.Array], [System.Object[]])]
     param(
+        # The certificate the response is about, and its issuer: together they give the
+        # certificate identifier. Without them the identifier is empty.
+        [System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate,
+
+        [System.Security.Cryptography.X509Certificates.X509Certificate2] $Issuer,
+
+        # RSA or ECDSA key to sign with. Without one the signature is a placeholder.
+        [object] $SignerKey,
+
+        # Certificates carried in the response, typically a delegated responder's.
+        [System.Security.Cryptography.X509Certificates.X509Certificate2[]] $IncludedCertificate = @(),
+
+        [switch] $CorruptSignature,
+
+        # Identify the certificate by SHA-256 hashes instead of SHA-1.
+        [switch] $Sha256CertificateId,
+
         # 0 is successful; anything else is a responder error carrying no data.
         [int] $ResponseStatus = 0,
 
@@ -270,7 +419,26 @@ function Get-TestOcspResponse {
         'Unknown' { $certStatus = ConvertTo-TestDer -Tag 0x82 }
     }
 
-    $single = [byte[]]((ConvertTo-TestDer -Tag 0x30) + $certStatus + (ConvertTo-TestDerTime -Value $ThisUpdate -Generalized))
+    $certificateId = ConvertTo-TestDer -Tag 0x30
+    if ($Certificate -and $Issuer) {
+        if ($Sha256CertificateId) {
+            $hasher = [System.Security.Cryptography.SHA256]::Create()
+            $hashAlgorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00))
+        } else {
+            $hasher = [System.Security.Cryptography.SHA1]::Create()
+            $hashAlgorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A, 0x05, 0x00))
+        }
+        $serial = $Certificate.GetSerialNumber()
+        [System.Array]::Reverse($serial)
+        $certificateId = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](
+                $hashAlgorithm +
+                (ConvertTo-TestDer -Tag 0x04 -Content $hasher.ComputeHash($Certificate.IssuerName.RawData)) +
+                (ConvertTo-TestDer -Tag 0x04 -Content $hasher.ComputeHash($Issuer.PublicKey.EncodedKeyValue.RawData)) +
+                (ConvertTo-TestDer -Tag 0x02 -Content $serial)))
+        $hasher.Dispose()
+    }
+
+    $single = [byte[]]($certificateId + $certStatus + (ConvertTo-TestDerTime -Value $ThisUpdate -Generalized))
     if ($null -ne $NextUpdate) {
         $single = [byte[]]($single + (ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDerTime -Value $NextUpdate -Generalized)))
     }
@@ -283,9 +451,17 @@ function Get-TestOcspResponse {
     $responderId = ConvertTo-TestDer -Tag 0xA1 -Content (ConvertTo-TestDer -Tag 0x30)
     $tbsContent = [byte[]]($tbsContent + $responderId + (ConvertTo-TestDerTime -Value $ProducedAt -Generalized) + $responses)
 
-    $algorithm = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]](0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, 0x05, 0x00))
-    $signature = ConvertTo-TestDer -Tag 0x03 -Content ([byte[]](0x00, 0x01, 0x02, 0x03))
-    $basic = ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]((ConvertTo-TestDer -Tag 0x30 -Content $tbsContent) + $algorithm + $signature))
+    $tbsElement = ConvertTo-TestDer -Tag 0x30 -Content $tbsContent
+    $signed = ConvertTo-TestSignature -Data $tbsElement -Key $SignerKey -Corrupt:$CorruptSignature
+    $basicContent = [byte[]]($tbsElement + $signed.Algorithm + $signed.Signature)
+    if ($IncludedCertificate.Count -gt 0) {
+        $list = [byte[]]@()
+        foreach ($included in $IncludedCertificate) {
+            $list = [byte[]]($list + $included.RawData)
+        }
+        $basicContent = [byte[]]($basicContent + (ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDer -Tag 0x30 -Content $list)))
+    }
+    $basic = ConvertTo-TestDer -Tag 0x30 -Content $basicContent
 
     $basicOid = ConvertTo-TestDer -Tag 0x06 -Content ([byte[]](0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x01))
     $responseBytes = ConvertTo-TestDer -Tag 0xA0 -Content (ConvertTo-TestDer -Tag 0x30 -Content ([byte[]]($basicOid + (ConvertTo-TestDer -Tag 0x04 -Content $basic))))
@@ -374,6 +550,158 @@ function Stop-TestHttpServer {
     $Server.Shell.Dispose()
 }
 
+function ConvertTo-TestTlsRecord {
+    <#
+    .SYNOPSIS
+        Wraps a payload in a TLS record header (content type, version 3.3, length).
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [int] $Type,
+
+        [AllowEmptyCollection()]
+        [byte[]] $Payload = @()
+    )
+
+    , ([byte[]](@($Type, 3, 3, (($Payload.Length -shr 8) -band 0xFF), ($Payload.Length -band 0xFF)) + $Payload))
+}
+
+function ConvertTo-TestHandshakeMessage {
+    <#
+    .SYNOPSIS
+        Prefixes a handshake message body with its type and three-byte length.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [int] $Type,
+
+        [AllowEmptyCollection()]
+        [byte[]] $Body = @()
+    )
+
+    , ([byte[]](@($Type, (($Body.Length -shr 16) -band 0xFF), (($Body.Length -shr 8) -band 0xFF), ($Body.Length -band 0xFF)) + $Body))
+}
+
+function Get-TestServerHelloBody {
+    <#
+    .SYNOPSIS
+        Builds the body of a ServerHello: version, random, empty session id, cipher suite, no
+        compression, and the given extensions.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [int] $Version = 0x0303,
+
+        [int] $CipherSuite = 0xC02F,
+
+        # Extension type -> extension data bytes.
+        [System.Collections.IDictionary] $Extension = @{},
+
+        [switch] $HelloRetryRequest
+    )
+
+    if ($HelloRetryRequest) {
+        $random = [byte[]](0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91,
+            0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E, 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C)
+    } else {
+        $random = [byte[]](1..32)
+    }
+
+    $body = [byte[]](@((($Version -shr 8) -band 0xFF), ($Version -band 0xFF)) + $random + @(0) +
+        @((($CipherSuite -shr 8) -band 0xFF), ($CipherSuite -band 0xFF)) + @(0))
+
+    if ($Extension.Count -gt 0) {
+        $all = [byte[]]@()
+        # Enumerated, not indexed: on an ordered dictionary a number is a position, not a key.
+        foreach ($entry in $Extension.GetEnumerator()) {
+            $type = [int]$entry.Key
+            $data = [byte[]]@($entry.Value)
+            $all = [byte[]]($all + @((([int]$type -shr 8) -band 0xFF), ([int]$type -band 0xFF),
+                    (($data.Length -shr 8) -band 0xFF), ($data.Length -band 0xFF)) + $data)
+        }
+        $body = [byte[]]($body + @((($all.Length -shr 8) -band 0xFF), ($all.Length -band 0xFF)) + $all)
+    }
+    , $body
+}
+
+function Get-TestCertificateMessageBody {
+    <#
+    .SYNOPSIS
+        Builds the body of a Certificate handshake message from certificates, in the order given.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]], [System.Array], [System.Object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2[]] $Certificate
+    )
+
+    $list = [byte[]]@()
+    foreach ($item in $Certificate) {
+        $raw = $item.RawData
+        $list = [byte[]]($list + @((($raw.Length -shr 16) -band 0xFF), (($raw.Length -shr 8) -band 0xFF), ($raw.Length -band 0xFF)) + $raw)
+    }
+    , ([byte[]](@((($list.Length -shr 16) -band 0xFF), (($list.Length -shr 8) -band 0xFF), ($list.Length -band 0xFF)) + $list))
+}
+
+function ConvertFrom-TestClientHello {
+    <#
+    .SYNOPSIS
+        Decodes a ClientHello record into its fields, to check what the module built.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [byte[]] $Bytes
+    )
+
+    $u16 = { param([int] $at) ([int]$Bytes[$at] -shl 8) -bor [int]$Bytes[$at + 1] }
+
+    $position = 5 + 4
+    $result = [ordered]@{
+        RecordType      = [int]$Bytes[0]
+        RecordVersion   = & $u16 1
+        RecordLength    = & $u16 3
+        HandshakeType   = [int]$Bytes[5]
+        HandshakeLength = ([int]$Bytes[6] -shl 16) -bor ([int]$Bytes[7] -shl 8) -bor [int]$Bytes[8]
+        ClientVersion   = & $u16 $position
+        SessionIdLength = [int]$Bytes[$position + 34]
+        CipherSuite     = @()
+        Extension       = [ordered]@{}
+        TotalLength     = $Bytes.Length
+    }
+    $position += 35 + $result.SessionIdLength
+
+    $suiteLength = & $u16 $position
+    $position += 2
+    $result.CipherSuite = @(for ($i = 0; $i -lt $suiteLength; $i += 2) { & $u16 ($position + $i) })
+    $position += $suiteLength
+
+    # compression methods
+    $position += 1 + [int]$Bytes[$position]
+
+    if ($position -lt $Bytes.Length) {
+        $end = $position + 2 + (& $u16 $position)
+        $position += 2
+        while ($position + 4 -le $end) {
+            $type = & $u16 $position
+            $size = & $u16 ($position + 2)
+            $data = New-Object byte[] $size
+            [System.Array]::Copy($Bytes, $position + 4, $data, 0, $size)
+            $result.Extension[[string]$type] = $data
+            $position += 4 + $size
+        }
+        $result.ExtensionEnd = $end
+    }
+
+    [PSCustomObject]$result
+}
+
 function Get-TestScriptedConnection {
     <#
     .SYNOPSIS
@@ -387,6 +715,9 @@ function Get-TestScriptedConnection {
     [CmdletBinding()]
     param(
         [string[]] $ServerLine = @(),
+
+        # Raw bytes the server has already sent, for binary protocols.
+        [byte[]] $ServerByte,
 
         [int] $TimeoutMs = 3000
     )
@@ -402,6 +733,10 @@ function Get-TestScriptedConnection {
     if ($ServerLine.Count -gt 0) {
         $bytes = [System.Text.Encoding]::ASCII.GetBytes(($ServerLine -join "`r`n") + "`r`n")
         $server.GetStream().Write($bytes, 0, $bytes.Length)
+        $server.GetStream().Flush()
+    }
+    if ($ServerByte) {
+        $server.GetStream().Write($ServerByte, 0, $ServerByte.Length)
         $server.GetStream().Flush()
     }
 

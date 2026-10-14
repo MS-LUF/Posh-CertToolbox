@@ -30,6 +30,31 @@ Describe 'Private/Certificate' -Tag Unit {
             }
         }
 
+        Describe 'Get-CertToolboxPublicKeySize' {
+            It 'returns the modulus size of an RSA key' {
+                Get-CertToolboxPublicKeySize -Certificate $script:chain.Leaf | Should -Be 2048
+
+                $key = [System.Security.Cryptography.RSA]::Create(3072)
+                $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                    'CN=rsa3072', $key, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                $certificate = $request.CreateSelfSigned([System.DateTimeOffset]::UtcNow.AddDays(-1), [System.DateTimeOffset]::UtcNow.AddDays(1))
+                Get-CertToolboxPublicKeySize -Certificate $certificate | Should -Be 3072
+            }
+
+            It 'returns the curve size of an elliptic curve key (<Curve>)' -ForEach @(
+                @{ Curve = 'nistP256'; Expected = 256 }
+                @{ Curve = 'nistP384'; Expected = 384 }
+                @{ Curve = 'nistP521'; Expected = 521 }
+            ) {
+                $key = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve+NamedCurves]::$Curve)
+                $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                    "CN=$Curve", $key, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+                $certificate = $request.CreateSelfSigned([System.DateTimeOffset]::UtcNow.AddDays(-1), [System.DateTimeOffset]::UtcNow.AddDays(1))
+
+                Get-CertToolboxPublicKeySize -Certificate $certificate | Should -Be $Expected
+            }
+        }
+
         Describe 'Test-CertToolboxSelfSigned' {
             It 'is true for a self-signed root' {
                 Test-CertToolboxSelfSigned -Certificate $script:chain.Root | Should -BeTrue

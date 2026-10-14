@@ -28,6 +28,10 @@ function Invoke-CertToolboxTlsProbe {
         for a server that expects TLS from the first byte.
     .PARAMETER SmtpEhloName
         The name to announce in the SMTP EHLO command, when StartTls is Smtp.
+    .PARAMETER Address
+        Connect to this address and no other, instead of resolving HostName.
+    .PARAMETER AddressFamily
+        When resolving HostName, use only its IPv4 or only its IPv6 addresses.
     .OUTPUTS
         The Invoke-CertToolboxTlsHandshake object, plus RemoteAddress, ElapsedMs and
         StartTlsDialogue (the plaintext exchange, empty for direct TLS).
@@ -62,17 +66,32 @@ function Invoke-CertToolboxTlsProbe {
         [string] $StartTls,
 
         [Parameter()]
-        [string] $SmtpEhloName
+        [string] $SmtpEhloName,
+
+        [Parameter()]
+        [System.Net.IPAddress] $Address,
+
+        [Parameter()]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string] $AddressFamily
     )
 
     if (-not $TargetHost) {
         $TargetHost = $HostName
     }
 
+    $connectParameter = @{ HostName = $HostName; Port = $Port; TimeoutMs = $TimeoutMs }
+    if ($Address) {
+        $connectParameter.Address = $Address
+    }
+    if ($AddressFamily) {
+        $connectParameter.AddressFamily = $AddressFamily
+    }
+
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $client = $null
     try {
-        $client = Connect-CertToolboxTcpClient -HostName $HostName -Port $Port -TimeoutMs $TimeoutMs
+        $client = Connect-CertToolboxTcpClient @connectParameter
         $remoteAddress = $client.Client.RemoteEndPoint.Address.ToString()
         $stream = $client.GetStream()
 

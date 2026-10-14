@@ -22,6 +22,9 @@ function Get-CertToolboxCaaRecord {
 
         DNS is queried through Google's DNS-over-HTTPS API (dns.google), so it works identically
         on every platform; the names queried are sent to that service.
+
+        The default display leaves out the Record and QueriedName properties; pipe the result
+        to Format-List with an asterisk to see every property.
     .PARAMETER Name
         One or more DNS names. A leading "*." is ignored, so a wildcard name can be given as is.
     .PARAMETER TimeoutSec

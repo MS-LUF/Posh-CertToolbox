@@ -12,6 +12,83 @@ Describe 'Private/CertificateUrl' -Tag Unit {
                 -CaIssuersUrl 'http://aia.test.example/ca.cer'
             $script:leafSerial = [byte[]](0x0A, 0x0B, 0x0C, 0x0D)
             $script:plain = (Get-TestCertificateChain).Leaf
+
+            # Splatted onto the fixture builders to get a CRL or an OCSP response that is really
+            # issued and signed by the test CA, about the test leaf.
+            $script:crlSigning = @{ IssuerName = $script:pair.Issuer.SubjectName.RawData; SignerKey = $script:pair.IssuerKey }
+            $script:ocspSigning = @{ Certificate = $script:pair.Leaf; Issuer = $script:pair.Issuer; SignerKey = $script:pair.IssuerKey }
+
+            $script:ecPair = Get-TestCertificateWithUrl -CrlUrl 'http://crl.test.example/ec.crl' -IssuerKeyType Ecdsa
+        }
+
+        Describe 'Signed structures and signatures' {
+            It 'copies a byte range and rejects one that runs past the data' {
+                $bytes = [byte[]](1, 2, 3, 4, 5)
+
+                (Copy-CertToolboxByteRange -Bytes $bytes -Offset 1 -Length 3) -join ',' | Should -Be '2,3,4'
+                { Copy-CertToolboxByteRange -Bytes $bytes -Offset 3 -Length 5 } | Should -Throw
+            }
+
+            It 'splits a certificate so that its signature verifies with its issuer''s key (<KeyType>)' -ForEach @(
+                @{ KeyType = 'RSA' }, @{ KeyType = 'ECDSA' }
+            ) {
+                $pair = $script:pair
+                if ($KeyType -eq 'ECDSA') { $pair = $script:ecPair }
+
+                $signed = ConvertFrom-CertToolboxSignedStructure -Bytes $pair.Leaf.RawData
+                $check = Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature `
+                    -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $pair.Issuer
+
+                $check.Status | Should -Be 'Valid'
+                $check.Detail | Should -BeNullOrEmpty
+            }
+
+            It 'reports Invalid for altered data, an altered signature and the wrong signer (<KeyType>)' -ForEach @(
+                @{ KeyType = 'RSA' }, @{ KeyType = 'ECDSA' }
+            ) {
+                $pair = $script:pair
+                if ($KeyType -eq 'ECDSA') { $pair = $script:ecPair }
+                $signed = ConvertFrom-CertToolboxSignedStructure -Bytes $pair.Leaf.RawData
+
+                $altered = [byte[]]$signed.ToBeSigned.Clone()
+                $altered[$altered.Length - 1] = $altered[$altered.Length - 1] -bxor 0x01
+                (Test-CertToolboxSignature -Data $altered -Signature $signed.Signature -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $pair.Issuer).Status | Should -Be 'Invalid'
+
+                $badSignature = [byte[]]$signed.Signature.Clone()
+                $badSignature[$badSignature.Length - 1] = $badSignature[$badSignature.Length - 1] -bxor 0x01
+                (Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $badSignature -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $pair.Issuer).Status | Should -Be 'Invalid'
+
+                $other = (Get-TestCertificateWithUrl -IssuerKeyType $KeyType).Issuer
+                (Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $other).Status | Should -Be 'Invalid'
+            }
+
+            It 'reports Invalid, without throwing, when the signer''s key is of another kind than the signature' {
+                $signed = ConvertFrom-CertToolboxSignedStructure -Bytes $script:pair.Leaf.RawData
+
+                $check = Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature `
+                    -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $script:ecPair.Issuer
+
+                $check.Status | Should -Be 'Invalid'
+                $check.Detail | Should -BeLike '*no RSA key*'
+            }
+
+            It 'reports NotVerified, naming the algorithm, for one it does not handle' {
+                $signed = ConvertFrom-CertToolboxSignedStructure -Bytes $script:pair.Leaf.RawData
+
+                $pss = Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature `
+                    -AlgorithmOid '2A-86-48-86-F7-0D-01-01-0A' -SignerCertificate $script:pair.Issuer
+                $pss.Status | Should -Be 'NotVerified'
+                $pss.Detail | Should -BeLike '*RSASSA-PSS*not supported*'
+
+                $unknown = Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature `
+                    -AlgorithmOid '2A-03-04' -SignerCertificate $script:pair.Issuer
+                $unknown.Status | Should -Be 'NotVerified'
+                $unknown.Detail | Should -BeLike '*2A-03-04*'
+            }
+
+            It 'throws on data that is not a signed structure' {
+                { ConvertFrom-CertToolboxSignedStructure -Bytes ([byte[]](0x30, 0x03, 0x02, 0x01, 0x05)) } | Should -Throw
+            }
         }
 
         Describe 'DER helpers' {
@@ -118,6 +195,48 @@ Describe 'Private/CertificateUrl' -Tag Unit {
                 (Read-CertToolboxCrl -Bytes $crl -SerialNumber $script:leafSerial).SerialListed | Should -BeTrue
             }
 
+            It 'verifies the signature of a CRL issued by the given CA (<KeyType>)' -ForEach @(
+                @{ KeyType = 'RSA' }, @{ KeyType = 'ECDSA' }
+            ) {
+                $pair = $script:pair
+                if ($KeyType -eq 'ECDSA') { $pair = $script:ecPair }
+                $crl = Get-TestCrl -IssuerName $pair.Issuer.SubjectName.RawData -SignerKey $pair.IssuerKey -PaddingEntryCount 20
+
+                $result = Read-CertToolboxCrl -Bytes $crl -SerialNumber $script:leafSerial -Issuer $pair.Issuer
+
+                $result.Signature | Should -Be 'Valid'
+                $result.SignatureDetail | Should -BeNullOrEmpty
+                $result.EntryCount | Should -Be 20
+            }
+
+            It 'verifies a PEM-encoded CRL too' {
+                $crl = Get-TestCrl @script:crlSigning -AsPem
+
+                (Read-CertToolboxCrl -Bytes $crl -SerialNumber $script:leafSerial -Issuer $script:pair.Issuer).Signature | Should -Be 'Valid'
+            }
+
+            It 'reports Invalid for a CRL whose signature does not hold' {
+                $tampered = Get-TestCrl @script:crlSigning -CorruptSignature
+                (Read-CertToolboxCrl -Bytes $tampered -SerialNumber $script:leafSerial -Issuer $script:pair.Issuer).Signature | Should -Be 'Invalid'
+
+                # Named after the right CA, but signed with another key.
+                $forged = Get-TestCrl -IssuerName $script:pair.Issuer.SubjectName.RawData -SignerKey $script:ecPair.IssuerKey
+                (Read-CertToolboxCrl -Bytes $forged -SerialNumber $script:leafSerial -Issuer $script:pair.Issuer).Signature | Should -Be 'Invalid'
+            }
+
+            It 'reports NotVerified for a CRL issued by another CA, and when no issuer is given' {
+                # A CRL naming a CA with a different name than the certificate's issuer.
+                $otherName = (Get-TestCertificateChain).Root.SubjectName.RawData
+                $indirect = Get-TestCrl -IssuerName $otherName -SignerKey $script:ecPair.IssuerKey
+                $result = Read-CertToolboxCrl -Bytes $indirect -SerialNumber $script:leafSerial -Issuer $script:pair.Issuer
+                $result.Signature | Should -Be 'NotVerified'
+                $result.SignatureDetail | Should -BeLike '*another CA*'
+
+                $noIssuer = Read-CertToolboxCrl -Bytes (Get-TestCrl @script:crlSigning) -SerialNumber $script:leafSerial
+                $noIssuer.Signature | Should -Be 'NotVerified'
+                $noIssuer.SignatureDetail | Should -BeLike '*issuer certificate is not available*'
+            }
+
             It 'throws on data that is not a CRL' {
                 { Read-CertToolboxCrl -Bytes ([System.Text.Encoding]::ASCII.GetBytes('<html>not found</html>')) -SerialNumber $script:leafSerial } | Should -Throw
                 { Read-CertToolboxCrl -Bytes ([System.Text.Encoding]::ASCII.GetBytes('-----BEGIN CERTIFICATE-----')) -SerialNumber $script:leafSerial } | Should -Throw '*neither a DER nor a PEM*'
@@ -180,6 +299,79 @@ Describe 'Private/CertificateUrl' -Tag Unit {
                 $result.CertificateStatus | Should -BeNullOrEmpty
 
                 (ConvertFrom-CertToolboxOcspResponse -Bytes (Get-TestOcspResponse -ResponseStatus 3)).ResponseStatus | Should -Be 'TryLater'
+            }
+
+            It 'verifies a response signed by the issuer itself' {
+                $bytes = Get-TestOcspResponse @script:ocspSigning
+
+                $result = ConvertFrom-CertToolboxOcspResponse -Bytes $bytes -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+
+                $result.CertificateStatus | Should -Be 'Good'
+                $result.Signature | Should -Be 'Valid'
+                $result.SignatureDetail | Should -BeNullOrEmpty
+            }
+
+            It 'accepts a certificate identifier made with SHA-256' {
+                $bytes = Get-TestOcspResponse @script:ocspSigning -Sha256CertificateId
+
+                (ConvertFrom-CertToolboxOcspResponse -Bytes $bytes -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer).Signature | Should -Be 'Valid'
+            }
+
+            It 'verifies a response signed by a delegated responder the issuer entitled' {
+                $responder = Get-TestOcspResponder -IssuerWithKey $script:pair.IssuerWithKey
+                $bytes = Get-TestOcspResponse -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer `
+                    -SignerKey $responder.Key -IncludedCertificate $responder.Certificate
+
+                $result = ConvertFrom-CertToolboxOcspResponse -Bytes $bytes -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+
+                $result.Signature | Should -Be 'Valid'
+                $result.SignatureDetail | Should -BeLike "*delegated responder certificate 'CertToolbox Test OCSP Responder'*"
+            }
+
+            It 'rejects a delegated responder that is <Case>' -ForEach @(
+                @{ Case = 'not marked for OCSP signing'; Option = @{ WithoutOcspSigningUsage = $true }; Expected = '*not marked for OCSP signing*' }
+                @{ Case = 'outside its validity dates'; Option = @{ Expired = $true }; Expected = '*outside its validity dates*' }
+                @{ Case = 'not issued by the CA'; Option = @{ SelfSigned = $true }; Expected = '*issuer did not sign*' }
+            ) {
+                $responder = Get-TestOcspResponder -IssuerWithKey $script:pair.IssuerWithKey @Option
+                $bytes = Get-TestOcspResponse -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer `
+                    -SignerKey $responder.Key -IncludedCertificate $responder.Certificate
+
+                $result = ConvertFrom-CertToolboxOcspResponse -Bytes $bytes -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+
+                $result.Signature | Should -Be 'Invalid'
+                $result.SignatureDetail | Should -BeLike $Expected
+            }
+
+            It 'reports Invalid when nobody the response carries signed it' {
+                $tampered = Get-TestOcspResponse @script:ocspSigning -CorruptSignature
+                $result = ConvertFrom-CertToolboxOcspResponse -Bytes $tampered -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+                $result.Signature | Should -Be 'Invalid'
+                $result.SignatureDetail | Should -BeLike '*neither by the issuer nor by a responder certificate*'
+
+                # Signed by a responder whose certificate is not in the response.
+                $responder = Get-TestOcspResponder -IssuerWithKey $script:pair.IssuerWithKey
+                $orphan = Get-TestOcspResponse -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer -SignerKey $responder.Key
+                (ConvertFrom-CertToolboxOcspResponse -Bytes $orphan -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer).Signature | Should -Be 'Invalid'
+            }
+
+            It 'reports Invalid for a validly signed response about another certificate' {
+                $other = Get-TestCertificateWithUrl -SerialNumber ([byte[]](0x09, 0x09))
+                # Correctly signed by our CA, but identifying a certificate that is not ours.
+                $bytes = Get-TestOcspResponse -Certificate $other.Leaf -Issuer $script:pair.Issuer -SignerKey $script:pair.IssuerKey
+
+                $result = ConvertFrom-CertToolboxOcspResponse -Bytes $bytes -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+
+                $result.Signature | Should -Be 'Invalid'
+                $result.SignatureDetail | Should -BeLike '*about another certificate*'
+            }
+
+            It 'reports NotVerified when the certificates are not given, and no signature status for a responder error' {
+                $unverified = ConvertFrom-CertToolboxOcspResponse -Bytes (Get-TestOcspResponse @script:ocspSigning)
+                $unverified.Signature | Should -Be 'NotVerified'
+
+                $refused = ConvertFrom-CertToolboxOcspResponse -Bytes (Get-TestOcspResponse -ResponseStatus 6) -Certificate $script:pair.Leaf -Issuer $script:pair.Issuer
+                $refused.Signature | Should -BeNullOrEmpty
             }
 
             It 'throws on data that is not an OCSP response' {
@@ -266,10 +458,10 @@ Describe 'Private/CertificateUrl' -Tag Unit {
 
         Describe 'Invoke-CertToolboxCertificateUrlTest' {
             BeforeEach {
-                $script:goodCrl = Get-TestCrl -PaddingEntryCount 3
-                $script:revokedCrl = Get-TestCrl -RevokedSerial (, $script:leafSerial)
-                $script:expiredCrl = Get-TestCrl -ThisUpdate ([datetime]::UtcNow.AddDays(-20)) -NextUpdate ([datetime]::UtcNow.AddDays(-10))
-                $script:goodOcsp = Get-TestOcspResponse -CertificateStatus Good
+                $script:goodCrl = Get-TestCrl @script:crlSigning -PaddingEntryCount 3
+                $script:revokedCrl = Get-TestCrl @script:crlSigning -RevokedSerial (, $script:leafSerial)
+                $script:expiredCrl = Get-TestCrl @script:crlSigning -ThisUpdate ([datetime]::UtcNow.AddDays(-20)) -NextUpdate ([datetime]::UtcNow.AddDays(-10))
+                $script:goodOcsp = Get-TestOcspResponse @script:ocspSigning -CertificateStatus Good
                 $script:issuerBytes = $script:pair.Issuer.RawData
 
                 Mock Invoke-CertToolboxHttpRequest { , $script:goodCrl } -ParameterFilter { $Uri.Host -eq 'crl.test.example' }
@@ -306,6 +498,44 @@ Describe 'Private/CertificateUrl' -Tag Unit {
                 $issuer.Detail | Should -Be 'CN=CertToolbox Url Test CA'
             }
 
+            It 'reports a valid signature on CRL and OCSP rows, and none on a CA Issuers row' {
+                $rows = @(Invoke-CertToolboxCertificateUrlTest -ServerCertificate $script:pair.Leaf, $script:pair.Issuer -LocalCertificate @())
+
+                ($rows | Where-Object { $_.Type -eq 'Crl' -and $_.Url -like 'http*' }).Signature | Should -Be 'Valid'
+                ($rows | Where-Object Type -eq 'Ocsp').Signature | Should -Be 'Valid'
+                ($rows | Where-Object Type -eq 'CaIssuers').Signature | Should -BeNullOrEmpty
+                ($rows | Where-Object { $_.Url -like 'ldap:*' }).Signature | Should -BeNullOrEmpty
+            }
+
+            It 'replaces the result with InvalidSignature when a CRL or an OCSP answer is not properly signed' {
+                $script:badCrl = Get-TestCrl @script:crlSigning -CorruptSignature
+                $script:badOcsp = Get-TestOcspResponse @script:ocspSigning -CorruptSignature
+                Mock Invoke-CertToolboxHttpRequest { , $script:badCrl } -ParameterFilter { $Uri.Host -eq 'crl.test.example' }
+                Mock Invoke-CertToolboxHttpRequest { , $script:badOcsp } -ParameterFilter { $Uri.Host -eq 'ocsp.test.example' }
+
+                $rows = @(Invoke-CertToolboxCertificateUrlTest -ServerCertificate $script:pair.Leaf, $script:pair.Issuer -LocalCertificate @())
+
+                $crl = $rows | Where-Object { $_.Type -eq 'Crl' -and $_.Url -like 'http*' }
+                $crl.Result | Should -Be 'InvalidSignature'
+                $crl.Signature | Should -Be 'Invalid'
+                $crl.Reachable | Should -BeTrue
+                $crl.Detail | Should -BeLike '*does not match the signer key*'
+
+                $ocsp = $rows | Where-Object Type -eq 'Ocsp'
+                $ocsp.Result | Should -Be 'InvalidSignature'
+                $ocsp.Signature | Should -Be 'Invalid'
+            }
+
+            It 'keeps the result and says why when a CRL signature cannot be verified' {
+                # Only the leaf is known: its issuer certificate is in neither chain.
+                $row = Invoke-CertToolboxCertificateUrlTest -ServerCertificate $script:pair.Leaf -LocalCertificate @() |
+                    Where-Object { $_.Type -eq 'Crl' -and $_.Url -like 'http*' }
+
+                $row.Result | Should -Be 'NotRevoked'
+                $row.Signature | Should -Be 'NotVerified'
+                $row.Detail | Should -BeLike '3 revoked certificate(s) listed. The issuer certificate is not available.'
+            }
+
             It 'sends the OCSP request as a POST with the right content type and body' {
                 Invoke-CertToolboxCertificateUrlTest -ServerCertificate $script:pair.Leaf, $script:pair.Issuer -LocalCertificate @() | Out-Null
 
@@ -337,8 +567,8 @@ Describe 'Private/CertificateUrl' -Tag Unit {
             }
 
             It 'reports what the OCSP responder answered: <Expected>' -ForEach @(
-                @{ Expected = 'Revoked'; Response = { Get-TestOcspResponse -CertificateStatus Revoked } }
-                @{ Expected = 'Unknown'; Response = { Get-TestOcspResponse -CertificateStatus Unknown } }
+                @{ Expected = 'Revoked'; Response = { Get-TestOcspResponse @script:ocspSigning -CertificateStatus Revoked } }
+                @{ Expected = 'Unknown'; Response = { Get-TestOcspResponse @script:ocspSigning -CertificateStatus Unknown } }
                 @{ Expected = 'ResponderError'; Response = { Get-TestOcspResponse -ResponseStatus 6 } }
             ) {
                 $script:ocspBytes = & $Response

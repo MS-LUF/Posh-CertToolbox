@@ -11,8 +11,8 @@ function Read-CertToolboxDerHeader {
     .PARAMETER Offset
         Index of the tag byte to read.
     .OUTPUTS
-        PSCustomObject with Tag, Length and ValueOffset (index of the first value byte), or
-        nothing when the header runs past the end of the data.
+        PSCustomObject with Offset (index of the tag byte), Tag, Length and ValueOffset (index
+        of the first value byte), or nothing when the header runs past the end of the data.
     .EXAMPLE
         Read-CertToolboxDerHeader -Bytes $extension.RawData -Offset 0
     #>
@@ -48,6 +48,7 @@ function Read-CertToolboxDerHeader {
     }
 
     [PSCustomObject]@{
+        Offset      = [int]$Offset
         Tag         = [int]$tag
         Length      = [int]$length
         ValueOffset = [int]$valueOffset

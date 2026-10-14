@@ -11,15 +11,21 @@ function Read-CertToolboxCrl {
         CRL can hold tens of thousands of entries, and creating an object per entry would take
         seconds instead of milliseconds.
 
-        The CRL's signature is not verified, and neither is its issuer or its scope (a
-        partitioned or delta CRL is read like a full one): this reads what the file says.
+        When the issuer's certificate is given, the CRL's signature is verified with its key,
+        after checking that the CRL names that issuer. A CRL issued by another CA than the
+        certificate's own issuer (an indirect CRL) is reported as NotVerified, not as Invalid.
+
+        The CRL's scope is not examined: a partitioned or delta CRL is read like a full one.
     .PARAMETER Bytes
         The CRL as downloaded.
     .PARAMETER SerialNumber
         The certificate serial number to look for, most significant byte first.
+    .PARAMETER Issuer
+        The certificate of the CA expected to have issued the CRL. Without it the signature is
+        not verified.
     .OUTPUTS
-        PSCustomObject with ThisUpdate, NextUpdate ($null when the CRL has none), EntryCount and
-        SerialListed.
+        PSCustomObject with ThisUpdate, NextUpdate ($null when the CRL has none), EntryCount,
+        SerialListed, Signature (Valid, Invalid or NotVerified) and SignatureDetail.
     .EXAMPLE
         Read-CertToolboxCrl -Bytes $crlBytes -SerialNumber $serial
     #>
@@ -30,7 +36,10 @@ function Read-CertToolboxCrl {
         [byte[]] $Bytes,
 
         [Parameter(Mandatory)]
-        [byte[]] $SerialNumber
+        [byte[]] $SerialNumber,
+
+        [Parameter()]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2] $Issuer
     )
 
     if ($Bytes.Length -gt 0 -and $Bytes[0] -eq 0x2D) {
@@ -58,6 +67,7 @@ function Read-CertToolboxCrl {
         throw [System.FormatException]::new('The certificate revocation list is truncated.')
     }
 
+    $issuerName = $field[$index + 1]
     $thisUpdate = ConvertFrom-CertToolboxDerTime -Bytes $Bytes -Header $field[$index + 2]
     $nextUpdate = $null
     $index += 3
@@ -119,10 +129,27 @@ function Read-CertToolboxCrl {
         }
     }
 
+    $signature = 'NotVerified'
+    $signatureDetail = 'The issuer certificate is not available.'
+    if ($Issuer) {
+        $crlIssuer = [System.BitConverter]::ToString($Bytes, $issuerName.Offset, $issuerName.ValueOffset + $issuerName.Length - $issuerName.Offset)
+        if ($crlIssuer -cne [System.BitConverter]::ToString($Issuer.SubjectName.RawData)) {
+            $signatureDetail = "The CRL is issued by another CA than the certificate's issuer (indirect CRL)."
+        } else {
+            $signed = ConvertFrom-CertToolboxSignedStructure -Bytes $Bytes
+            $check = Test-CertToolboxSignature -Data $signed.ToBeSigned -Signature $signed.Signature `
+                -AlgorithmOid $signed.AlgorithmOid -SignerCertificate $Issuer
+            $signature = $check.Status
+            $signatureDetail = $check.Detail
+        }
+    }
+
     [PSCustomObject]@{
-        ThisUpdate   = $thisUpdate
-        NextUpdate   = $nextUpdate
-        EntryCount   = $entryCount
-        SerialListed = $serialListed
+        ThisUpdate      = $thisUpdate
+        NextUpdate      = $nextUpdate
+        EntryCount      = $entryCount
+        SerialListed    = $serialListed
+        Signature       = $signature
+        SignatureDetail = $signatureDetail
     }
 }

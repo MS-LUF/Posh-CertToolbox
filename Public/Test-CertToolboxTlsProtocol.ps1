@@ -18,6 +18,9 @@ function Test-CertToolboxTlsProtocol {
         parameter; the plaintext exchange is then repeated on each connection. When that
         exchange itself fails (the server does not offer the upgrade, for instance), every
         version is reported as not negotiated with that error.
+
+        The default display is a table of the main columns; pipe the result to Format-List
+        with an asterisk to see every property, the negotiated cipher suite among them.
     .PARAMETER HostName
         One or more DNS names or IP addresses to connect to.
     .PARAMETER Port
@@ -35,6 +38,12 @@ function Test-CertToolboxTlsProtocol {
     .PARAMETER SmtpEhloName
         The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this
         machine's host name.
+    .PARAMETER EveryAddress
+        Probes every IP address the name resolves to, instead of the first one that answers,
+        and returns one set of results per address; RemoteAddress tells them apart. An address
+        that cannot be reached shows as not negotiated for every version, with the error.
+    .PARAMETER AddressFamily
+        Uses only the IPv4 or only the IPv6 addresses of the name.
     .INPUTS
         System.String. Host names as strings, or objects with HostName, Port, TargetHost and StartTls properties.
     .OUTPUTS
@@ -78,7 +87,14 @@ function Test-CertToolboxTlsProtocol {
 
         [Parameter()]
         [ValidatePattern('^[A-Za-z0-9.:\[\]-]+$')]
-        [string] $SmtpEhloName
+        [string] $SmtpEhloName,
+
+        [Parameter()]
+        [switch] $EveryAddress,
+
+        [Parameter()]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string] $AddressFamily
     )
 
     begin {
@@ -88,7 +104,13 @@ function Test-CertToolboxTlsProtocol {
     }
 
     process {
-        foreach ($item in $HostName) {
+        $targetParameter = @{ HostName = $HostName; EveryAddress = $EveryAddress }
+        if ($AddressFamily) {
+            $targetParameter.AddressFamily = $AddressFamily
+        }
+
+        foreach ($entry in (Get-CertToolboxProbeTarget @targetParameter)) {
+            $item = $entry.HostName
             $serverName = $TargetHost
             if (-not $serverName) {
                 $serverName = $item
@@ -116,6 +138,21 @@ function Test-CertToolboxTlsProtocol {
                 }
             }
 
+            $target = "$($entry.Label):$endpointPort"
+            if ($entry.Error) {
+                Write-CertToolboxLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -Target $target -Message "The name could not be resolved: $($entry.Error.Message)"
+                $PSCmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+                        $entry.Error, 'TlsConnectionFailed', [System.Management.Automation.ErrorCategory]::ConnectionError, $target))
+                continue
+            }
+            if ($entry.Address) {
+                $probeParameter.Address = $entry.Address
+            }
+            if ($AddressFamily) {
+                $probeParameter.AddressFamily = $AddressFamily
+            }
+
             foreach ($protocolName in $Protocol) {
                 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
                 $probe = $null
@@ -123,7 +160,7 @@ function Test-CertToolboxTlsProtocol {
                 $errorMessage = $null
 
                 try {
-                    Write-Verbose "Probing ${item}:$endpointPort with $protocolName only (StartTls '$StartTls')."
+                    Write-Verbose "Probing $target with $protocolName only (StartTls '$StartTls')."
                     $probe = Invoke-CertToolboxTlsProbe @probeParameter -SslProtocol ([System.Security.Authentication.SslProtocols]$protocolName)
                 } catch {
                     $exception = Resolve-CertToolboxException -Exception $_.Exception
@@ -132,9 +169,18 @@ function Test-CertToolboxTlsProtocol {
                 }
                 $stopwatch.Stop()
 
+                # Known from the connection when it succeeded, from the target when a specific
+                # address was probed, and unknown otherwise.
+                $remoteAddress = $null
+                if ($probe) {
+                    $remoteAddress = $probe.RemoteAddress
+                } elseif ($entry.Address) {
+                    $remoteAddress = "$($entry.Address)"
+                }
+
                 if ($probe -and @($probe.StartTlsDialogue).Count -gt 0) {
                     Write-CertToolboxLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
-                        -Target "${item}:$endpointPort" -Message "$StartTls dialogue before TLS: $(@($probe.StartTlsDialogue) -join ' | ')"
+                        -Target $target -Message "$StartTls dialogue before TLS: $(@($probe.StartTlsDialogue) -join ' | ')"
                 }
 
                 $result = [ordered]@{
@@ -142,6 +188,7 @@ function Test-CertToolboxTlsProtocol {
                     HostName             = $item
                     Port                 = $endpointPort
                     TargetHost           = $serverName
+                    RemoteAddress        = $remoteAddress
                     StartTls             = $startTlsValue
                     Protocol             = $protocolName
                     Negotiated           = ($null -ne $probe)
@@ -169,7 +216,7 @@ function Test-CertToolboxTlsProtocol {
                     $summary = "${protocolName}: negotiated ($($probe.Protocol))"
                 }
                 Write-CertToolboxLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
-                    -Target "${item}:$endpointPort" -Message $summary
+                    -Target $target -Message $summary
 
                 [PSCustomObject]$result
             }

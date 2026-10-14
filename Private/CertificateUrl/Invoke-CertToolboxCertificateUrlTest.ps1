@@ -23,9 +23,15 @@ function Invoke-CertToolboxCertificateUrlTest {
         Any type: Failed when the URL cannot be reached or its content cannot be read, Skipped
         for a URL that is not http or https.
 
-        Each distinct request is made once, even when several certificates share the URL. No
-        signature is verified: these tests tell whether the revocation and issuer
-        infrastructure answers and what it says, they are not a trust decision.
+        The signature of each CRL and OCSP answer is verified against the certificate's issuer
+        and reported in Signature: Valid, Invalid, or NotVerified when it could not be checked
+        (issuer certificate unavailable, unsupported algorithm, CRL issued by another CA). An
+        Invalid signature replaces the Result with InvalidSignature, since such an answer
+        proves nothing. Signature stays empty for CA Issuers rows and for rows with no answer.
+
+        Each distinct request is made once, even when several certificates share the URL. A
+        valid signature means "signed by the issuer found in these chains"; whether that
+        issuer is itself trusted is not decided here.
     .PARAMETER ServerCertificate
         The certificates the server sent, leaf first.
     .PARAMETER LocalCertificate
@@ -114,6 +120,7 @@ function Invoke-CertToolboxCertificateUrlTest {
                 Type       = $task.Type
                 Url        = $task.Url
                 Result     = $null
+                Signature  = $null
                 Reachable  = $null
                 ThisUpdate = $null
                 NextUpdate = $null
@@ -152,10 +159,18 @@ function Invoke-CertToolboxCertificateUrlTest {
                     $row.Detail = $outcome.Error
                 } else {
                     $row.Reachable = $true
+                    $signatureStatus = $null
+                    $signatureDetail = $null
                     try {
                         switch ($task.Type) {
                             'Crl' {
-                                $crl = Read-CertToolboxCrl -Bytes $outcome.Content -SerialNumber $serial
+                                $crlParameter = @{ Bytes = $outcome.Content; SerialNumber = $serial }
+                                if ($issuer) {
+                                    $crlParameter.Issuer = $issuer
+                                }
+                                $crl = Read-CertToolboxCrl @crlParameter
+                                $signatureStatus = $crl.Signature
+                                $signatureDetail = $crl.SignatureDetail
                                 $row.ThisUpdate = $crl.ThisUpdate
                                 $row.NextUpdate = $crl.NextUpdate
                                 $expired = ($null -ne $crl.NextUpdate -and $crl.NextUpdate -lt [datetime]::UtcNow)
@@ -170,7 +185,9 @@ function Invoke-CertToolboxCertificateUrlTest {
                                 }
                             }
                             'Ocsp' {
-                                $ocsp = ConvertFrom-CertToolboxOcspResponse -Bytes $outcome.Content
+                                $ocsp = ConvertFrom-CertToolboxOcspResponse -Bytes $outcome.Content -Certificate $certificate -Issuer $issuer
+                                $signatureStatus = $ocsp.Signature
+                                $signatureDetail = $ocsp.SignatureDetail
                                 if ($ocsp.ResponseStatus -eq 'Successful') {
                                     $row.Result = $ocsp.CertificateStatus
                                     $row.ThisUpdate = $ocsp.ThisUpdate
@@ -194,6 +211,16 @@ function Invoke-CertToolboxCertificateUrlTest {
                                     $row.Detail = "Returned: $($check.Subject)"
                                 }
                             }
+                        }
+
+                        # A CRL or an OCSP answer whose signature does not hold proves nothing,
+                        # so what it says must not be reported as the result.
+                        $row.Signature = $signatureStatus
+                        if ($signatureStatus -eq 'Invalid') {
+                            $row.Result = 'InvalidSignature'
+                            $row.Detail = $signatureDetail
+                        } elseif ($signatureDetail) {
+                            $row.Detail = "$($row.Detail). $signatureDetail"
                         }
                     } catch {
                         $row.Result = 'Failed'

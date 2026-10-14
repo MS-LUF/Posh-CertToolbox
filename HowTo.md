@@ -16,6 +16,8 @@ certificates will differ when you run them.
 10. [Checking many endpoints at once](#10-checking-many-endpoints-at-once)
 11. [Enabling logging](#11-enabling-logging)
 12. [Testing the CRL, OCSP and issuer URLs of a chain](#12-testing-the-crl-ocsp-and-issuer-urls-of-a-chain)
+13. [Finding what a server really supports](#13-finding-what-a-server-really-supports)
+14. [Checking every server behind a name](#14-checking-every-server-behind-a-name)
 
 ```powershell
 Import-Module .\Posh-CertToolbox.psd1
@@ -26,6 +28,28 @@ Import-Module .\Posh-CertToolbox.psd1
 ## 1. Inspecting a TLS endpoint
 
 ```powershell
+Get-CertToolboxTlsCertificate -HostName 'www.google.com'
+```
+
+```
+Endpoint         : www.google.com:443
+RemoteAddress    : 142.251.156.119
+Protocol         : Tls13
+Cipher           : TLS_AES_256_GCM_SHA384
+ValidationPassed : True
+Subject          : CN=www.google.com
+Issuer           : CN=WE2, O=Google Trust Services, C=US
+NotAfter         : 2026-12-21 (68 days)
+Chain            : 3 sent by the server, 4 in the local chain
+```
+
+That is a summary, not the object. Lines appear only when they have something to say
+(`PolicyError`, `MissingIntermediate`, `StartTls` and others show up when relevant), and some
+are computed for display: `Endpoint`, `Cipher`, `Chain`, and the `Subject`, `Issuer` and
+`NotAfter` of the leaf are not property names. The object itself has many more properties;
+`Format-List *` prints them all, and you can pick the ones you need:
+
+```powershell
 $r = Get-CertToolboxTlsCertificate -HostName 'www.google.com'
 $r | Format-List HostName, Port, RemoteAddress, Protocol, CipherSuite, ValidationPassed, ElapsedMs
 ```
@@ -33,15 +57,28 @@ $r | Format-List HostName, Port, RemoteAddress, Protocol, CipherSuite, Validatio
 ```
 HostName         : www.google.com
 Port             : 443
-RemoteAddress    : 142.251.152.119
+RemoteAddress    : 142.251.156.119
 Protocol         : Tls13
 CipherSuite      : TLS_AES_256_GCM_SHA384
 ValidationPassed : True
-ElapsedMs        : 154
+ElapsedMs        : 28
 ```
 
-The result carries nested certificate objects, so displaying it whole is long; pick the
-properties you need. The leaf certificate is in `Certificate`:
+`Format-Table` gives one line per result, which suits several endpoints:
+
+```powershell
+Get-CertToolboxTlsCertificate 'www.google.com', 'expired.badssl.com' | Format-Table
+```
+
+```
+HostName           Port RemoteAddress   Protocol Valid  Days Subject
+--------           ---- -------------   -------- -----  ---- -------
+www.google.com     443  142.251.156.119 Tls13    True     68 CN=www.google.com
+expired.badssl.com 443  104.154.89.105  Tls12    False -4202 CN=*.badssl.com, OU=PositiveSSL Wildcard, OU=Domain Control Validated
+```
+
+The other cmdlets and the lists inside their results have a short default display in the same
+way. The leaf certificate is in `Certificate`:
 
 ```powershell
 $r.Certificate | Format-List Subject, Issuer, NotAfter, DaysUntilExpiry, SubjectAlternativeName, PublicKeyAlgorithm, PublicKeySize, SignatureAlgorithm
@@ -354,7 +391,23 @@ Everything from the earlier sections then applies unchanged: both chains, the co
 ## 9. Finding which CAs may issue for a domain
 
 ```powershell
-Get-CertToolboxCaaRecord -Name 'www.google.com' | Format-List
+Get-CertToolboxCaaRecord -Name 'www.google.com'
+```
+
+```
+Name                : www.google.com
+HasCaaRecord        : True
+RecordSetName       : google.com
+IssueRestricted     : True
+Issue               : pki.goog
+IssueWildRestricted : True
+IssueWild           : pki.goog
+```
+
+The whole object, with the raw records and the names tried:
+
+```powershell
+Get-CertToolboxCaaRecord -Name 'www.google.com' | Format-List *
 ```
 
 ```
@@ -366,7 +419,7 @@ Issue               : {pki.goog}
 IssueWildRestricted : True
 IssueWild           : {pki.goog}
 Iodef               : {}
-Record              : {@{Flag=0; Critical=False; Tag=issue; Value=pki.goog; CaDomain=pki.goog; Ttl=5972}}
+Record              : {@{Flag=0; Critical=False; Tag=issue; Value=pki.goog; CaDomain=pki.goog; Ttl=21600}}
 QueriedName         : {www.google.com, google.com}
 ```
 
@@ -528,26 +581,29 @@ chains, and puts the outcome in `UrlTest`:
 
 ```powershell
 $r = Get-CertToolboxTlsCertificate 'www.microsoft.com' -TestCertificateUrl
-$r.UrlTest | Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result, NextUpdate, ElapsedMs
+$r.UrlTest | Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result, Signature, NextUpdate, ElapsedMs
 ```
 
 ```
-Subject                            Chain Type      Result      NextUpdate            ElapsedMs
--------                            ----- ----      ------      ----------            ---------
-CN=www.microsoft.com               Both  Crl       NotRevoked  10/17/2026 2:33:08 PM       117
-CN=www.microsoft.com               Both  Crl       NotRevoked  10/17/2026 2:33:08 PM        89
-CN=www.microsoft.com               Both  Ocsp      Good        10/14/2026 4:43:23 AM       192
-CN=www.microsoft.com               Both  CaIssuers IssuerMatch                              40
-CN=www.microsoft.com               Both  CaIssuers IssuerMatch                              54
-CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  12/31/2026 6:57:33 AM        39
-CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  12/31/2026 6:57:33 AM        54
-CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Ocsp      Good        10/13/2026 8:55:12 PM       182
-CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                              37
-CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                              44
-CN=Microsoft TLS RSA Root G2       Both  Crl       NotRevoked  10/23/2026 5:42:07 PM        41
-CN=Microsoft TLS RSA Root G2       Both  Ocsp      Good        10/15/2026 6:31:02 PM        43
-CN=Microsoft TLS RSA Root G2       Both  CaIssuers IssuerMatch                              31
+Subject                            Chain Type      Result      Signature NextUpdate            ElapsedMs
+-------                            ----- ----      ------      --------- ----------            ---------
+CN=www.microsoft.com               Both  Crl       NotRevoked  Valid     10/18/2026 6:33:09 PM       127
+CN=www.microsoft.com               Both  Crl       NotRevoked  Valid     10/18/2026 2:33:09 PM       119
+CN=www.microsoft.com               Both  Ocsp      Good        Valid     10/17/2026 4:43:48 AM       201
+CN=www.microsoft.com               Both  CaIssuers IssuerMatch                                        38
+CN=www.microsoft.com               Both  CaIssuers IssuerMatch                                        20
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  Valid     12/31/2026 6:57:33 AM        41
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Crl       NotRevoked  Valid     12/31/2026 6:57:33 AM        43
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  Ocsp      Good        Valid     10/16/2026 8:55:35 PM       175
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                                        40
+CN=Microsoft TLS G2 RSA CA OCSP 04 Both  CaIssuers IssuerMatch                                        12
+CN=Microsoft TLS RSA Root G2       Both  Crl       NotRevoked  Valid     10/30/2026 5:42:07 PM        30
+CN=Microsoft TLS RSA Root G2       Both  Ocsp      Good        Valid     10/16/2026 6:31:02 PM        42
+CN=Microsoft TLS RSA Root G2       Both  CaIssuers IssuerMatch                                        39
 ```
+
+This run also shows something a single check would hide: the leaf's two CRL URLs returned CRLs
+with different `NextUpdate` times, so the two servers were not serving the same copy.
 
 One row per certificate and URL. A certificate that lists two CRL URLs gets two rows. The root
 has no such URL and no row. Each row has more than the table shows:
@@ -563,11 +619,12 @@ Chain      : Both
 Type       : Ocsp
 Url        : http://oneocsp.microsoft.com/ocsp
 Result     : Good
+Signature  : Valid
 Reachable  : True
-ThisUpdate : 10/7/2026 4:43:23 AM
-NextUpdate : 10/14/2026 4:43:23 AM
-Detail     : Response produced at 2026-10-07 04:43:23Z
-ElapsedMs  : 192
+ThisUpdate : 10/10/2026 4:43:48 AM
+NextUpdate : 10/17/2026 4:43:48 AM
+Detail     : Response produced at 2026-10-10 04:43:48Z. Signed by the delegated responder certificate 'Microsoft TLS G2 RSA CA OCSP 04 External OCSP Responder 2026-09-'.
+ElapsedMs  : 201
 ```
 
 | `Type` | `Result` | Meaning |
@@ -580,6 +637,7 @@ ElapsedMs  : 192
 | `CaIssuers` | `IssuerMatch` | The URL returns the issuer's certificate |
 | `CaIssuers` | `IssuerMismatch` | It returns a certificate, but not the issuer's |
 | `CaIssuers` | `NotACertificate` | It returns something else, an error page for instance |
+| `Crl`, `Ocsp` | `InvalidSignature` | The answer is not properly signed (see below), so what it says is not reported |
 | any | `Failed` | No usable answer: unreachable, HTTP error, timeout, or unreadable content. `Detail` has the error |
 | any | `Skipped` | Not testable, with the reason in `Detail`: an `ldap://` URL, or an OCSP test whose issuer certificate is in neither chain |
 
@@ -587,25 +645,41 @@ ElapsedMs  : 192
 tells a server that answered with something wrong (`True`) from one that did not answer
 (`False`).
 
+**`Signature`** says whether the CRL or the OCSP answer is really from the certificate's
+issuer. It is empty for CA Issuers rows.
+
+| `Signature` | Meaning |
+|---|---|
+| `Valid` | A CRL: issued and signed by the certificate's issuer. An OCSP answer: about this certificate, and signed by the issuer or by a responder certificate the issuer delegated to |
+| `Invalid` | The signature does not hold, the OCSP answer is about another certificate, or the responder certificate is not entitled to sign. `Result` becomes `InvalidSignature` and `Detail` says which |
+| `NotVerified` | It could not be checked, and `Detail` says why: the issuer's certificate is in neither chain, the algorithm is not handled (RSASSA-PSS, Ed25519), or the CRL is issued by another CA than the certificate's issuer. `Result` keeps what the answer says |
+
+In the OCSP row above, `Detail` shows that Microsoft's responder signs with its own
+certificate, delegated by the CA, rather than with the CA's key. That certificate was checked
+too: signed by the CA, marked for OCSP signing, and within its validity dates.
+
 **`Chain`** says where the certificate comes from: `Server` (only in what the server sent),
 `Local` (only in the chain this machine built) or `Both`. A certificate in both is tested once.
 With a server that sends only its leaf, the intermediates appear as `Local`:
 
 ```powershell
 (Get-CertToolboxTlsCertificate 'incomplete-chain.badssl.com' -TestCertificateUrl).UrlTest |
-    Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result
+    Format-Table @{ n = 'Subject'; e = { $_.Subject.Split(',')[0] } }, Chain, Type, Result, Signature
 ```
 
 ```
-Subject         Chain Type      Result
--------         ----- ----      ------
-CN=*.badssl.com Both  Crl       NotRevoked
+Subject         Chain Type      Result      Signature
+-------         ----- ----      ------      ---------
+CN=*.badssl.com Both  Crl       NotRevoked  Valid
 CN=*.badssl.com Both  CaIssuers IssuerMatch
-CN=YR1          Local Crl       NotRevoked
+CN=YR1          Local Crl       NotRevoked  Valid
 CN=YR1          Local CaIssuers IssuerMatch
-CN=Root YR      Local Crl       NotRevoked
+CN=Root YR      Local Crl       NotRevoked  Valid
 CN=Root YR      Local CaIssuers IssuerMatch
 ```
+
+The leaf's CRL signature could be verified although the server did not send the issuer: its
+certificate was found in the local chain.
 
 Those certificates carry no OCSP URL, so there is no `Ocsp` row: several public CAs no longer
 run OCSP for their certificates and publish CRLs only. A missing type is not an error.
@@ -616,7 +690,7 @@ run OCSP for their certificates and publish CRLs only. A missing type is not an 
 $r = Get-CertToolboxTlsCertificate 'revoked.badssl.com' -TestCertificateUrl
 $r | Format-List ValidationPassed, RevocationMode
 $r.UrlTest | Where-Object Result -notin 'NotRevoked', 'Good', 'IssuerMatch' |
-    Format-List Subject, Chain, Type, Url, Result, NextUpdate, Detail
+    Format-List Subject, Chain, Type, Url, Result, Signature, NextUpdate, Detail
 ```
 
 ```
@@ -628,8 +702,9 @@ Chain      : Both
 Type       : Crl
 Url        : http://ye2.c.lencr.org/74.crl
 Result     : Revoked
-NextUpdate : 10/18/2026 5:35:52 PM
-Detail     : 1541 revoked certificate(s) listed
+Signature  : Valid
+NextUpdate : 10/19/2026 8:05:52 PM
+Detail     : 1540 revoked certificate(s) listed
 ```
 
 `ValidationPassed` is the operating system's verdict, and it did not check revocation because
@@ -661,8 +736,11 @@ revoked.badssl.com Crl  Revoked http://ye2.c.lencr.org/74.crl
 
 Things to know:
 
-- **The tests do not verify signatures.** A CRL or an OCSP answer is read as received. This is
-  a diagnosis of the infrastructure, not a trust decision; for that, use `-CheckRevocation`.
+- **A valid signature is relative to the chain.** It means the answer comes from the issuer
+  found in these chains; whether that issuer is trusted is the operating system's call. This
+  remains a diagnosis of the infrastructure; for the trust decision, use `-CheckRevocation`.
+- **Not covered:** whether a delegated OCSP responder certificate is itself revoked, and the
+  scope of a partitioned or delta CRL (it is read like a full one).
 - **They contact the certificate authorities' servers**, over plain HTTP because that is what
   the URLs in certificates use. An OCSP request tells the CA which certificate you asked about.
 - **`UrlTest` is empty when the switch is not used.** With the switch it is a list, which can
@@ -672,3 +750,342 @@ Things to know:
 - **A failing URL never fails the cmdlet.** It is a row with `Failed`.
 - With logging on, each call writes one line with the number of tests and the URLs that had a
   problem.
+
+---
+
+## 13. Finding what a server really supports
+
+`Test-CertToolboxTlsProtocol` (section 7) tells what *this machine* can negotiate.
+`Get-CertToolboxTlsCapability` tells what *the server* supports, whatever this machine has
+enabled: it sends its own handshake openings and reads the server's answers, without ever
+completing a handshake.
+
+```powershell
+$c = Get-CertToolboxTlsCapability -HostName 'www.microsoft.com'
+$c
+$c.Protocol
+```
+
+```
+Endpoint             : www.microsoft.com:443
+RemoteAddress        : 23.200.213.221
+Protocol             : Tls12, Tls13
+CipherSuite          : 18 accepted, 0 weak
+Group                : x25519, secp256r1, X25519MLKEM768
+OcspStapling         : True
+SecureRenegotiation  : True
+ExtendedMasterSecret : True
+WireChain            : 3 certificate(s)
+ConnectionCount      : 39
+
+Protocol Accepted CipherSuiteCount ServerCipherOrder Reason
+-------- -------- ---------------- ----------------- ------
+Ssl3     False                   0                   The server refused with the alert 'handshake_failure'.
+Tls      False                   0                   The server refused with the alert 'protocol_version'.
+Tls11    False                   0                   The server refused with the alert 'protocol_version'.
+Tls12    True                   13 True
+Tls13    True                    5 True
+```
+
+The first block is the summary shown by default: `Protocol`, `CipherSuite`, `Group` and
+`WireChain` are condensed there, and hold the full lists in the object. `Reason` is the
+server's own refusal: the alert it sent, or what it did instead. The result holds three lists
+and a few facts.
+
+**`CipherSuite`**: every suite the server accepts, per version, in the order it picks them.
+
+```powershell
+$c.CipherSuite | Where-Object Protocol -eq 'Tls12' |
+    Format-Table Order, Name, Code, ForwardSecrecy, AuthenticatedEncryption, Weak
+```
+
+```
+Order Name                                        Code   ForwardSecrecy AuthenticatedEncryption  Weak
+----- ----                                        ----   -------------- -----------------------  ----
+    1 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384       0xC030           True                    True False
+    2 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256       0xC02F           True                    True False
+    3 TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 0xCCA8           True                    True False
+    4 TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384       0xC028           True                   False False
+    5 TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256       0xC027           True                   False False
+    6 TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA          0xC014           True                   False False
+    7 TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA          0xC013           True                   False False
+    8 TLS_RSA_WITH_AES_256_GCM_SHA384             0x009D          False                    True False
+    9 TLS_RSA_WITH_AES_128_GCM_SHA256             0x009C          False                    True False
+   10 TLS_RSA_WITH_AES_256_CBC_SHA256             0x003D          False                   False False
+   11 TLS_RSA_WITH_AES_128_CBC_SHA256             0x003C          False                   False False
+   12 TLS_RSA_WITH_AES_256_CBC_SHA                0x0035          False                   False False
+   13 TLS_RSA_WITH_AES_128_CBC_SHA                0x002F          False                   False False
+```
+
+The three last columns are facts read from the suite's name:
+
+| Column | True when |
+|---|---|
+| `ForwardSecrecy` | The key exchange is ephemeral (ECDHE or DHE), or the suite is a TLS 1.3 one |
+| `AuthenticatedEncryption` | The cipher authenticates what it encrypts (GCM, CCM, ChaCha20-Poly1305), as opposed to CBC |
+| `Weak` | No encryption (NULL), no server authentication (anonymous), an export-grade key, or RC4, RC2, DES, 3DES, IDEA or MD5 |
+
+They describe the suite, not your policy: a CBC suite is not flagged `Weak`, and a suite that is
+not `Weak` can still be one you do not want.
+
+`Order` is the order the server chose them in. `ServerCipherOrder`, in the `Protocol` list, says
+whether that order is the server's own preference (`True`) or just follows the order of the
+offer (`False`), in which case it carries no meaning.
+
+**`Group`**: the key-exchange groups, for TLS 1.3 and for the highest earlier version accepted.
+
+```powershell
+$c.Group
+```
+
+```
+Protocol Name           Code
+-------- ----           ----
+Tls12    x25519           29
+Tls12    secp256r1        23
+Tls13    x25519           29
+Tls13    secp256r1        23
+Tls13    X25519MLKEM768 4588
+```
+
+`X25519MLKEM768` is a post-quantum hybrid group.
+
+**`WireChain`**: the certificate chain exactly as the server put it on the wire, order and
+duplicates included.
+
+```powershell
+$c.WireChain | Format-Table Subject, Issuer
+```
+
+```
+Subject                                                              Issuer
+-------                                                              ------
+CN=www.microsoft.com, O=Microsoft Corporation, L=Redmond, S=WA, C=US CN=Microsoft TLS G2 RSA CA OCSP 04, O=Microsoft Corporation, C=US
+CN=Microsoft TLS G2 RSA CA OCSP 04, O=Microsoft Corporation, C=US    CN=Microsoft TLS RSA Root G2, O=Microsoft Corporation, C=US
+CN=Microsoft TLS RSA Root G2, O=Microsoft Corporation, C=US          CN=DigiCert Global Root G2, OU=www.digicert.com, O=DigiCert Inc, C=US
+```
+
+**Facts**: `OcspStapling` (the server sends an OCSP answer with its certificate),
+`SecureRenegotiation` and `ExtendedMasterSecret`.
+
+**Finding weak suites across servers:**
+
+```powershell
+Get-CertToolboxTlsCapability 'rc4.badssl.com', 'www.google.com' | ForEach-Object {
+    $name = $_.HostName
+    $_.CipherSuite | Where-Object Weak | Select-Object @{ n = 'HostName'; e = { $name } }, Protocol, Name
+} | Format-Table
+```
+
+```
+HostName       Protocol Name
+--------       -------- ----
+rc4.badssl.com Tls      TLS_ECDHE_RSA_WITH_RC4_128_SHA
+rc4.badssl.com Tls      TLS_RSA_WITH_RC4_128_SHA
+rc4.badssl.com Tls11    TLS_ECDHE_RSA_WITH_RC4_128_SHA
+rc4.badssl.com Tls11    TLS_RSA_WITH_RC4_128_SHA
+rc4.badssl.com Tls12    TLS_ECDHE_RSA_WITH_RC4_128_SHA
+rc4.badssl.com Tls12    TLS_RSA_WITH_RC4_128_SHA
+www.google.com Tls      TLS_RSA_WITH_3DES_EDE_CBC_SHA
+www.google.com Tls11    TLS_RSA_WITH_3DES_EDE_CBC_SHA
+www.google.com Tls12    TLS_RSA_WITH_3DES_EDE_CBC_SHA
+```
+
+**Server or client? Compare the two cmdlets.** Here both say SSL 3.0 does not work, but for
+different reasons:
+
+```powershell
+(Get-CertToolboxTlsCapability 'www.google.com' -Protocol Ssl3, Tls, Tls12).Protocol | Format-Table Protocol, Accepted, Reason
+Test-CertToolboxTlsProtocol 'www.google.com' -Protocol Ssl3, Tls, Tls12 | Format-Table Protocol, Negotiated, ErrorMessage
+```
+
+```
+Protocol Accepted Reason
+-------- -------- ------
+Ssl3        False The server refused with the alert 'protocol_version'.
+Tls          True
+Tls12        True
+
+Protocol Negotiated ErrorMessage
+-------- ---------- ------------
+Ssl3          False The client and server cannot communicate, because they do not possess a common algorithm.
+Tls            True
+Tls12          True
+```
+
+The first table is the server's answer: it refuses SSL 3.0. The second is this Windows
+machine's: it could not even offer it. When the first says `True` and the second `False`, the
+server supports the version and the problem is on the client.
+
+**Mail servers** work the same way with `-StartTls`; the plaintext exchange is repeated on every
+connection:
+
+```powershell
+$m = Get-CertToolboxTlsCapability -HostName 'smtp.gmail.com' -Port 587 -StartTls Smtp -Protocol Tls12, Tls13
+$m.Protocol | Format-Table Protocol, Accepted, CipherSuiteCount, ServerCipherOrder
+```
+
+```
+Protocol Accepted CipherSuiteCount ServerCipherOrder
+-------- -------- ---------------- -----------------
+Tls12        True               14             False
+Tls13        True                3             False
+```
+
+That scan took 35 connections and 2.4 seconds.
+
+Things to know:
+
+- **It makes many connections.** One per accepted cipher suite and per group tried: 39 for the
+  first example. The server sees each as an abandoned handshake, and an intrusion detection
+  system may notice. `-Protocol` narrows the scan.
+- **TLS 1.3 hides the rest of the handshake.** For a server that only accepts TLS 1.3,
+  `OcspStapling`, `SecureRenegotiation`, `ExtendedMasterSecret` and `WireChain` are empty. Use
+  `Get-CertToolboxTlsCertificate` for the chain.
+- **Nothing is validated.** The handshake is never completed, so no certificate is checked and
+  no key is exchanged; `WireChain` is what was sent, not what is trusted.
+- **Every suite of the IANA registry is offered**, about 350, which is how NULL, EXPORT,
+  anonymous and RC4 suites are found. A suite outside the registry would show as its code.
+- **Groups before TLS 1.3 are elliptic curves only.** The finite-field parameters of DHE suites
+  are not reported. SSL 2.0 is not probed.
+- **A port that does not speak TLS** gives a result whose versions are all refused, with the
+  reason. Only an endpoint that cannot be reached at all is an error.
+
+---
+
+## 14. Checking every server behind a name
+
+A name often resolves to several addresses, each a different node or data centre. By default
+the cmdlets connect to the first one that answers, so a node with an old certificate or a
+different configuration goes unseen. `-EveryAddress` probes each address in turn and returns
+one result per address; `RemoteAddress` tells them apart.
+
+```powershell
+$r = Get-CertToolboxTlsCertificate 'outlook.office365.com' -EveryAddress
+$r | Format-Table RemoteAddress, Protocol, ValidationPassed, @{ n = 'Thumbprint'; e = { $_.Certificate.Thumbprint } }, ElapsedMs
+```
+
+```
+RemoteAddress         Protocol ValidationPassed Thumbprint                               ElapsedMs
+-------------         -------- ---------------- ----------                               ---------
+52.97.233.114         Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5       124
+52.98.227.146         Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        36
+52.98.178.146         Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+40.99.155.50          Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        24
+52.97.201.2           Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+40.99.153.130         Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        24
+40.99.214.50          Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        26
+40.99.220.130         Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+2603:1026:c0a:8b5::2  Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        26
+2603:1026:c0a:185f::2 Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+2603:1026:c0a:1857::2 Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+2603:1026:c0a:8e8::2  Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        24
+2603:1026:c0a:185a::2 Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+2603:1026:c0a:1860::2 Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        25
+2603:1026:c0a:851::2  Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        28
+2603:1026:c0a:1883::2 Tls13                True C7C19E04464D744D810EF31A24C54FC22A7909C5        26
+```
+
+The name you gave is still what is presented to each server and checked against its
+certificate; only the address connected to changes.
+
+**Do they all serve the same certificate?** Group by thumbprint: one group means yes.
+
+```powershell
+$r | Group-Object { $_.Certificate.Thumbprint } | Format-Table Count, Name
+```
+
+```
+Count Name
+----- ----
+   16 C7C19E04464D744D810EF31A24C54FC22A7909C5
+```
+
+Two groups would mean some nodes serve another certificate; the `RemoteAddress` of the
+smaller group says which. The same works on anything else in the result: `Protocol`,
+`ValidationPassed`, the number of certificates in `ServerChain`.
+
+**One family only.** `-AddressFamily IPv4` or `IPv6` limits the addresses probed:
+
+```powershell
+Get-CertToolboxTlsCertificate 'www.cloudflare.com' -EveryAddress -AddressFamily IPv4 |
+    Format-Table HostName, RemoteAddress, Protocol, ValidationPassed
+```
+
+```
+HostName           RemoteAddress Protocol ValidationPassed
+--------           ------------- -------- ----------------
+www.cloudflare.com 104.16.123.96 Tls13                True
+www.cloudflare.com 104.16.124.96 Tls13                True
+```
+
+Without `-EveryAddress`, `-AddressFamily` chooses which family the single connection uses,
+which is a quick way to test a service over IPv6:
+
+```powershell
+Get-CertToolboxTlsCertificate 'www.google.com' -AddressFamily IPv6 | Format-List HostName, RemoteAddress, Protocol
+```
+
+```
+HostName      : www.google.com
+RemoteAddress : 2001:4860:4827:7700::
+Protocol      : Tls13
+```
+
+**The other TLS cmdlets take the same two parameters.** `Test-CertToolboxTlsProtocol` returns
+its rows once per address:
+
+```powershell
+Test-CertToolboxTlsProtocol 'www.cloudflare.com' -EveryAddress -Protocol Tls11, Tls13 |
+    Format-Table RemoteAddress, Protocol, Negotiated
+```
+
+```
+RemoteAddress        Protocol Negotiated
+-------------        -------- ----------
+104.16.123.96        Tls11         False
+104.16.123.96        Tls13          True
+104.16.124.96        Tls11         False
+104.16.124.96        Tls13          True
+2606:4700::6810:7c60 Tls11         False
+2606:4700::6810:7c60 Tls13          True
+2606:4700::6810:7b60 Tls11         False
+2606:4700::6810:7b60 Tls13          True
+```
+
+`Get-CertToolboxTlsCapability` repeats its whole scan for each address, so narrow it:
+
+```powershell
+Get-CertToolboxTlsCapability 'www.cloudflare.com' -EveryAddress -AddressFamily IPv4 -Protocol Tls12, Tls13 |
+    Format-Table RemoteAddress, @{ n = 'Versions'; e = { ($_.Protocol | Where-Object Accepted).Protocol -join ',' } },
+        @{ n = 'Suites'; e = { @($_.CipherSuite).Count } }, ConnectionCount
+```
+
+```
+RemoteAddress Versions    Suites ConnectionCount
+------------- --------    ------ ---------------
+104.16.123.96 Tls12,Tls13     23              43
+104.16.124.96 Tls12,Tls13     23              43
+```
+
+Things to know:
+
+- **"Every address" means every address your resolver returns.** Large services answer
+  differently depending on where and whom you ask, and rotate their answers: the first table
+  above lists 16 addresses, and another run a moment earlier listed others. It is not a list
+  of every node that exists.
+- **An address that cannot be reached is an error for that address only**; the others are
+  still returned. A machine without IPv6 connectivity gets one error per IPv6 address, which
+  `-AddressFamily IPv4` avoids.
+- **A name with no address of the family asked for is an error:**
+
+  ```powershell
+  Get-CertToolboxTlsCertificate 'badssl.com' -EveryAddress -AddressFamily IPv6
+  ```
+
+  ```
+  'badssl.com' has no IPv6 address.
+  ```
+
+- **To test one address you already know**, use `-HostName` with the address and `-TargetHost`
+  with the name (section 4).

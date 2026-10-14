@@ -16,7 +16,7 @@ server sent, and the chain this machine builds from it.
 ```
 Get-CertToolboxTlsCertificate [-HostName] <String[]> [-Port <Int32>] [-TargetHost <String>]
  [-Protocol <String[]>] [-TimeoutSec <Int32>] [-CheckRevocation] [-StartTls <String>] [-SmtpEhloName <String>]
- [-TestCertificateUrl] [<CommonParameters>]
+ [-TestCertificateUrl] [-EveryAddress] [-AddressFamily <String>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -65,13 +65,30 @@ Good, Revoked, Unknown or ResponderError; for CA Issuers it is IssuerMatch,
 IssuerMismatch or NotACertificate; and for any of them Failed (no usable answer) or
 Skipped (not testable, with the reason in Detail).
 
+The signature of each CRL and OCSP answer is verified against the certificate's issuer
+and shown in the Signature column: Valid, Invalid, or NotVerified when it could not be
+checked (the reason is in Detail).
+An OCSP answer must also be about the certificate
+asked for, and may be signed by a responder certificate the issuer delegated to.
+When
+the signature is Invalid, the Result becomes InvalidSignature, because such an answer
+proves nothing.
+
 These tests show whether the revocation and issuer infrastructure answers and what it
 says.
-They do not verify the signature of a CRL or of an OCSP response, so they are a
-diagnosis and not a trust decision; CheckRevocation gives the operating system's own
-verdict.
-They contact the certificate authorities' servers, over plain HTTP as those
-URLs require.
+A valid signature means the answer comes from the issuer found in these chains;
+whether that issuer is itself trusted is not decided here, so this remains a diagnosis
+and CheckRevocation gives the operating system's own verdict.
+The tests contact the
+certificate authorities' servers, over plain HTTP as those URLs require.
+
+The default display is a summary of about ten lines, and some of them are computed
+for display and are not property names: Endpoint, Cipher, Chain, and the Subject,
+Issuer and NotAfter of the leaf, which are read from the Certificate property.
+Pipe
+the result to Format-List with an asterisk to see every property, or to Format-Table
+for one line per result.
+The certificates of a chain are shown as a table.
 
 ## EXAMPLES
 
@@ -103,10 +120,17 @@ Inspects the certificate of a mail submission server, showing the SMTP dialogue.
 
 ### EXAMPLE 5
 ```
-(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, NextUpdate, Url
+(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, Signature, NextUpdate, Url
 ```
 
 Tests the CRL, OCSP and CA Issuers URLs of every certificate of both chains.
+
+### EXAMPLE 6
+```
+Get-CertToolboxTlsCertificate 'www.example.com' -EveryAddress | Group-Object { $_.Certificate.Thumbprint } | Select-Object Count, Name
+```
+
+Probes every address behind the name and shows whether they all serve the same certificate.
 
 ## PARAMETERS
 
@@ -254,6 +278,45 @@ Aliases:
 Required: False
 Position: Named
 Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -EveryAddress
+Probes every IP address the name resolves to, instead of the first one that answers,
+and returns one result per address; RemoteAddress tells them apart.
+Use it to find a
+node behind a load-balanced name that serves a different certificate or chain.
+An
+address that cannot be reached is an error for that address only.
+The addresses are
+the ones this machine's resolver returns.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AddressFamily
+Uses only the IPv4 or only the IPv6 addresses of the name.
+With EveryAddress it limits
+the addresses probed; without it, it chooses which family to connect over.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```

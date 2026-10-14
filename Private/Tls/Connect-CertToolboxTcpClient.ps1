@@ -18,6 +18,11 @@ function Connect-CertToolboxTcpClient {
     .PARAMETER TimeoutMs
         Timeout, in milliseconds, applied to each connection attempt and then to socket reads
         and writes.
+    .PARAMETER Address
+        Connect to this address and no other, instead of resolving HostName. This is how one
+        particular node behind a name is reached.
+    .PARAMETER AddressFamily
+        When resolving HostName, use only its IPv4 or only its IPv6 addresses.
     .OUTPUTS
         System.Net.Sockets.TcpClient, connected. The caller owns it and must close it.
     .EXAMPLE
@@ -33,12 +38,24 @@ function Connect-CertToolboxTcpClient {
         [int] $Port,
 
         [Parameter()]
-        [int] $TimeoutMs = 10000
+        [int] $TimeoutMs = 10000,
+
+        [Parameter()]
+        [System.Net.IPAddress] $Address,
+
+        [Parameter()]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string] $AddressFamily
     )
 
-    $addresses = @([System.Net.Dns]::GetHostAddresses($HostName))
-    if ($addresses.Count -eq 0) {
-        throw [System.Net.Sockets.SocketException]::new([int][System.Net.Sockets.SocketError]::HostNotFound)
+    if ($Address) {
+        $addresses = @($Address)
+    } else {
+        $resolveParameter = @{ HostName = $HostName }
+        if ($AddressFamily) {
+            $resolveParameter.AddressFamily = $AddressFamily
+        }
+        $addresses = @(Resolve-CertToolboxHostAddress @resolveParameter)
     }
 
     $lastException = $null

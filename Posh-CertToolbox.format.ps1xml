@@ -1,0 +1,462 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default display of the objects returned by the Posh-CertToolbox cmdlets.
+
+  These views only change what is printed: the objects keep all their properties, and
+  "Format-List *" shows them. Several lines are computed for display (Endpoint, Cipher, the
+  certificate lines, the counts) and are not property names.
+
+  For a type with two views, the first one is the default and the second one is what
+  Format-Table uses.
+-->
+<Configuration>
+  <ViewDefinitions>
+
+    <!-- Get-CertToolboxTlsCertificate -->
+    <View>
+      <Name>CertToolbox.TlsCertificate.List</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCertificate</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem>
+                <Label>Endpoint</Label>
+                <ScriptBlock>"$($_.HostName):$($_.Port)"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>TargetHost</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.TargetHost -and $_.TargetHost -ne $_.HostName</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>RemoteAddress</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>StartTls</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.StartTls</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>Protocol</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>Cipher</Label>
+                <ScriptBlock>if ($_.CipherSuite) { $_.CipherSuite } else { "$($_.CipherAlgorithm) $($_.CipherStrength)" }</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ValidationPassed</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>PolicyError</Label>
+                <ScriptBlock>@($_.PolicyError) -join ', '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.PolicyError</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>ChainStatus</Label>
+                <ScriptBlock>@($_.ChainStatus) -join ', '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.ChainStatus</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>Subject</Label>
+                <ScriptBlock>$_.Certificate.Subject</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>Issuer</Label>
+                <ScriptBlock>$_.Certificate.Issuer</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>NotAfter</Label>
+                <ScriptBlock>'{0:yyyy-MM-dd} ({1} days)' -f $_.Certificate.NotAfter, $_.Certificate.DaysUntilExpiry</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>Chain</Label>
+                <ScriptBlock>"$(@($_.ServerChain).Count) sent by the server, $(@($_.LocalChain).Count) in the local chain"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>MissingIntermediate</Label>
+                <ScriptBlock>@($_.MissingIntermediate | ForEach-Object { $_.Subject }) -join '; '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.MissingIntermediate</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ServerSentRoot</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.ServerSentRoot</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>UnusedServerCertificate</Label>
+                <ScriptBlock>@($_.UnusedServerCertificate | ForEach-Object { $_.Subject }) -join '; '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.UnusedServerCertificate</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>UrlTest</Label>
+                <ScriptBlock>$healthy = 'NotRevoked', 'Good', 'IssuerMatch', 'Skipped'; "$(@($_.UrlTest).Count) run, $(@($_.UrlTest | Where-Object { $healthy -notcontains $_.Result }).Count) with a problem"</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.UrlTest</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>CertToolbox.TlsCertificate.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCertificate</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>HostName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Port</Label></TableColumnHeader>
+          <TableColumnHeader><Label>RemoteAddress</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Valid</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Days</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Subject</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>HostName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Port</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>RemoteAddress</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Protocol</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ValidationPassed</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$_.Certificate.DaysUntilExpiry</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$_.Certificate.Subject</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- The certificates of ServerChain, LocalChain, WireChain and the like -->
+    <View>
+      <Name>CertToolbox.CertificateInfo.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.CertificateInfo</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <!-- Issuer comes last: it is the column that can be cut on a narrow console at the
+               least cost, being the Subject of the next certificate of a chain. -->
+          <TableColumnHeader><Label>Subject</Label></TableColumnHeader>
+          <TableColumnHeader><Label>NotAfter</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Days</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Issuer</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Subject</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>'{0:yyyy-MM-dd}' -f $_.NotAfter</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>DaysUntilExpiry</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.Status) -join ', '</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>Issuer</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- The rows of UrlTest -->
+    <View>
+      <Name>CertToolbox.CertificateUrlTest.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.CertificateUrlTest</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Certificate</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Chain</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Type</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Result</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Signature</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Url</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><ScriptBlock>("$($_.Subject)" -split ',\s*(?=[A-Za-z0-9.]+=)')[0]</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>Chain</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Type</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Result</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Signature</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Url</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- Test-CertToolboxTlsProtocol -->
+    <View>
+      <Name>CertToolbox.TlsProtocolResult.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsProtocolResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>HostName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Port</Label></TableColumnHeader>
+          <TableColumnHeader><Label>RemoteAddress</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Negotiated</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorMessage</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>HostName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Port</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>RemoteAddress</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Protocol</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Negotiated</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ErrorMessage</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- Get-CertToolboxTlsCapability -->
+    <View>
+      <Name>CertToolbox.TlsCapability.List</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCapability</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem>
+                <Label>Endpoint</Label>
+                <ScriptBlock>"$($_.HostName):$($_.Port)"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>TargetHost</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.TargetHost -and $_.TargetHost -ne $_.HostName</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>RemoteAddress</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>StartTls</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.StartTls</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>Protocol</Label>
+                <ScriptBlock>$accepted = @($_.Protocol | Where-Object { $_.Accepted } | ForEach-Object { $_.Protocol }); if ($accepted.Count) { $accepted -join ', ' } else { 'none accepted' }</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>CipherSuite</Label>
+                <ScriptBlock>"$(@($_.CipherSuite).Count) accepted, $(@($_.CipherSuite | Where-Object { $_.Weak }).Count) weak"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <Label>Group</Label>
+                <ScriptBlock>@($_.Group | ForEach-Object { $_.Name } | Select-Object -Unique) -join ', '</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>OcspStapling</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>SecureRenegotiation</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ExtendedMasterSecret</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>WireChain</Label>
+                <ScriptBlock>"$(@($_.WireChain).Count) certificate(s)"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ConnectionCount</PropertyName>
+              </ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>CertToolbox.TlsCapability.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCapability</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>HostName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Port</Label></TableColumnHeader>
+          <TableColumnHeader><Label>RemoteAddress</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Suites</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Weak</Label><Alignment>Right</Alignment></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>HostName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Port</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>RemoteAddress</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.Protocol | Where-Object { $_.Accepted } | ForEach-Object { $_.Protocol }) -join ', '</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.CipherSuite).Count</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.CipherSuite | Where-Object { $_.Weak }).Count</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>CertToolbox.TlsCapabilityProtocol.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCapabilityProtocol</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Accepted</Label></TableColumnHeader>
+          <TableColumnHeader><Label>CipherSuiteCount</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>ServerCipherOrder</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Reason</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Protocol</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Accepted</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>CipherSuiteCount</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ServerCipherOrder</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Reason</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>CertToolbox.TlsCapabilityCipherSuite.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCapabilityCipherSuite</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Order</Label><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Code</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ForwardSecrecy</Label></TableColumnHeader>
+          <TableColumnHeader><Label>AuthenticatedEncryption</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Weak</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Protocol</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Order</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Code</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>ForwardSecrecy</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>AuthenticatedEncryption</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Weak</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>CertToolbox.TlsCapabilityGroup.Table</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.TlsCapabilityGroup</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Protocol</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Name</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Code</Label><Alignment>Right</Alignment></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Protocol</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Code</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+
+    <!-- Get-CertToolboxCaaRecord -->
+    <View>
+      <Name>CertToolbox.CaaRecord.List</Name>
+      <ViewSelectedBy>
+        <TypeName>CertToolbox.CaaRecord</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem>
+                <PropertyName>Name</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>HasCaaRecord</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>RecordSetName</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.HasCaaRecord</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>IssueRestricted</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>Issue</Label>
+                <ScriptBlock>@($_.Issue) -join ', '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.IssueRestricted</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <PropertyName>IssueWildRestricted</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>IssueWild</Label>
+                <ScriptBlock>@($_.IssueWild) -join ', '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.IssueWildRestricted</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+              <ListItem>
+                <Label>Iodef</Label>
+                <ScriptBlock>@($_.Iodef) -join ', '</ScriptBlock>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.Iodef</ScriptBlock>
+                </ItemSelectionCondition>
+              </ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+
+  </ViewDefinitions>
+</Configuration>

@@ -204,6 +204,74 @@ Describe 'Get-CertToolboxTlsCertificate' -Tag Unit {
         }
     }
 
+    Context 'EveryAddress' {
+        BeforeEach {
+            $script:probeResult = Get-TestTlsProbeResult -ServerCertificate $script:chain.Leaf -LocalCertificate $script:chain.Leaf
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe { $script:probeResult }
+            Mock -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress {
+                [System.Net.IPAddress]::Parse('192.0.2.10')
+                [System.Net.IPAddress]::Parse('192.0.2.11')
+                [System.Net.IPAddress]::Parse('2001:db8::1')
+            }
+        }
+
+        It 'does not resolve the name, and names no address to the probe, by default' {
+            Get-CertToolboxTlsCertificate -HostName 'many.test.example' | Out-Null
+
+            Should -Invoke -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress -Times 0 -Exactly
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 1 -Exactly -ParameterFilter { $null -eq $Address -and -not $AddressFamily }
+        }
+
+        It 'probes each address of the name, keeping the name as host name and server name' {
+            $results = @(Get-CertToolboxTlsCertificate -HostName 'many.test.example' -EveryAddress)
+
+            $results.Count | Should -Be 3
+            @($results | Where-Object { $_.HostName -ne 'many.test.example' -or $_.TargetHost -ne 'many.test.example' }) | Should -BeNullOrEmpty
+            foreach ($expected in '192.0.2.10', '192.0.2.11', '2001:db8::1') {
+                Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 1 -Exactly -ParameterFilter {
+                    "$Address" -eq $expected -and $HostName -eq 'many.test.example' -and $TargetHost -eq 'many.test.example'
+                }
+            }
+        }
+
+        It 'passes the address family to the resolution, and to the probe when not probing every address' {
+            Get-CertToolboxTlsCertificate -HostName 'many.test.example' -EveryAddress -AddressFamily IPv4 | Out-Null
+            Should -Invoke -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress -Times 1 -Exactly -ParameterFilter { $AddressFamily -eq 'IPv4' }
+
+            Get-CertToolboxTlsCertificate -HostName 'many.test.example' -AddressFamily IPv6 | Out-Null
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 1 -Exactly -ParameterFilter { $null -eq $Address -and $AddressFamily -eq 'IPv6' }
+        }
+
+        It 'reports an address that fails as an error naming it, and returns the others' {
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe { throw [System.TimeoutException]::new('timed out') } -ParameterFilter { "$Address" -eq '192.0.2.11' }
+
+            $output = Get-CertToolboxTlsCertificate -HostName 'many.test.example' -EveryAddress 2>&1
+
+            $errors = @($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+            $results = @($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+            $errors.Count | Should -Be 1
+            $errors[0].TargetObject | Should -Be 'many.test.example [192.0.2.11]:443'
+            $results.Count | Should -Be 2
+            Should -Invoke -ModuleName Posh-CertToolbox Write-CertToolboxLog -Times 1 -Exactly -ParameterFilter {
+                $Level -eq 'Error' -and $Target -eq 'many.test.example [192.0.2.11]:443'
+            }
+        }
+
+        It 'reports a name that does not resolve as an error, and carries on with the next name' {
+            Mock -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress {
+                throw [System.InvalidOperationException]::new("'gone.test.example' has no IPv6 address.")
+            } -ParameterFilter { $HostName -eq 'gone.test.example' }
+
+            $output = 'gone.test.example', 'many.test.example' | Get-CertToolboxTlsCertificate -EveryAddress 2>&1
+
+            $errors = @($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
+            $errors.Count | Should -Be 1
+            $errors[0].TargetObject | Should -Be 'gone.test.example:443'
+            $errors[0].Exception.Message | Should -BeLike '*has no IPv6 address*'
+            @($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }).Count | Should -Be 3
+        }
+    }
+
     Context 'chain problems' {
         It 'reports an intermediate the server did not send' {
             $script:probeResult = Get-TestTlsProbeResult -ServerCertificate $script:chain.Leaf `
@@ -329,6 +397,23 @@ Describe 'Get-CertToolboxTlsCertificate against real endpoints' -Tag Integration
         @($rows | Where-Object { $_.Type -eq 'Crl' -and $_.Result -eq 'NotRevoked' -and $_.NextUpdate -gt [datetime]::UtcNow }).Count | Should -BeGreaterThan 0
         @($rows | Where-Object { $_.Type -eq 'CaIssuers' -and $_.Result -eq 'IssuerMatch' }).Count | Should -BeGreaterThan 0
         @($rows | Where-Object { $_.Subject -eq $result.Certificate.Subject -and $_.Result -in 'Revoked', 'Failed' }) | Should -BeNullOrEmpty
+
+        # Real signatures: CRLs, and OCSP answers signed by a delegated responder.
+        @($rows | Where-Object { $_.Type -eq 'Ocsp' -and $_.Signature -eq 'Valid' }).Count | Should -BeGreaterThan 0
+        @($rows | Where-Object { $_.Type -eq 'Crl' -and $_.Signature -eq 'Valid' }).Count | Should -BeGreaterThan 0
+        @($rows | Where-Object { $_.Signature -eq 'Invalid' }) | Should -BeNullOrEmpty
+    }
+
+    It 'verifies the real CRLs of another CA, and explains the ones it cannot verify' {
+        # Which chain a server sends, and which one the machine builds, depend on the client
+        # and on its trust store: a cross-signed certificate at the top of the server's chain
+        # has an issuer that is in neither chain, and its CRL is then legitimately NotVerified.
+        # So: at least one CRL verifies, none is invalid, and any other says why.
+        $rows = @((Get-CertToolboxTlsCertificate -HostName 'www.google.com' -TestCertificateUrl).UrlTest | Where-Object Type -eq 'Crl')
+
+        @($rows | Where-Object Signature -eq 'Valid').Count | Should -BeGreaterThan 0
+        @($rows | Where-Object Signature -eq 'Invalid') | Should -BeNullOrEmpty
+        @($rows | Where-Object { $_.Signature -eq 'NotVerified' -and $_.Detail -notlike '*issuer certificate is not available*' }) | Should -BeNullOrEmpty
     }
 
     It 'finds a revoked certificate in its real CRL' {
@@ -346,6 +431,17 @@ Describe 'Get-CertToolboxTlsCertificate against real endpoints' -Tag Integration
             @($result.UrlTest | Where-Object Chain -eq 'Local').Count | Should -BeGreaterThan 0
         }
         @($result.UrlTest | Where-Object Chain -eq 'Both').Count | Should -BeGreaterThan 0
+    }
+
+    It 'returns one result per address of a name, each from the address it names' {
+        $results = @(Get-CertToolboxTlsCertificate -HostName 'www.cloudflare.com' -EveryAddress -AddressFamily IPv4 -TimeoutSec 8)
+
+        # The resolver may hand out a different set between two calls, so only the shape is firm.
+        $results.Count | Should -BeGreaterThan 0
+        @($results | Where-Object { $_.HostName -ne 'www.cloudflare.com' }) | Should -BeNullOrEmpty
+        @($results.RemoteAddress | Where-Object { $_ -match ':' }) | Should -BeNullOrEmpty
+        @($results.RemoteAddress | Select-Object -Unique).Count | Should -Be $results.Count
+        @($results | Where-Object { -not $_.ValidationPassed }) | Should -BeNullOrEmpty
     }
 
     It 'reports a name mismatch' {

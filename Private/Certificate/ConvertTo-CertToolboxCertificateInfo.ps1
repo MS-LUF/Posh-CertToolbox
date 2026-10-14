@@ -28,22 +28,7 @@ function ConvertTo-CertToolboxCertificateInfo {
         [string[]] $Status
     )
 
-    # Key size through the algorithm-specific accessors: the older PublicKey.Key property does
-    # not support ECDSA keys on the full framework.
-    $keySize = $null
-    try {
-        $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($Certificate)
-        if ($rsa) {
-            $keySize = $rsa.KeySize
-        } else {
-            $ecdsa = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPublicKey($Certificate)
-            if ($ecdsa) {
-                $keySize = $ecdsa.KeySize
-            }
-        }
-    } catch {
-        Write-Verbose "Public key size of '$($Certificate.Subject)' could not be read: $($_.Exception.Message)"
-    }
+    $keySize = Get-CertToolboxPublicKeySize -Certificate $Certificate
 
     $isCertificateAuthority = $false
     foreach ($extension in $Certificate.Extensions) {

@@ -15,8 +15,8 @@ negotiated.
 
 ```
 Test-CertToolboxTlsProtocol [-HostName] <String[]> [-Port <Int32>] [-TargetHost <String>]
- [-Protocol <String[]>] [-TimeoutSec <Int32>] [-StartTls <String>] [-SmtpEhloName <String>]
- [<CommonParameters>]
+ [-Protocol <String[]>] [-TimeoutSec <Int32>] [-StartTls <String>] [-SmtpEhloName <String>] [-EveryAddress]
+ [-AddressFamily <String>] [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -37,6 +37,9 @@ parameter; the plaintext exchange is then repeated on each connection.
 When that
 exchange itself fails (the server does not offer the upgrade, for instance), every
 version is reported as not negotiated with that error.
+
+The default display is a table of the main columns; pipe the result to Format-List
+with an asterisk to see every property, the negotiated cipher suite among them.
 
 ## EXAMPLES
 
@@ -157,6 +160,39 @@ Accept wildcard characters: False
 The name announced in the SMTP EHLO command, with StartTls Smtp.
 Defaults to this
 machine's host name.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -EveryAddress
+Probes every IP address the name resolves to, instead of the first one that answers,
+and returns one set of results per address; RemoteAddress tells them apart.
+An address
+that cannot be reached shows as not negotiated for every version, with the error.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AddressFamily
+Uses only the IPv4 or only the IPv6 addresses of the name.
 
 ```yaml
 Type: String

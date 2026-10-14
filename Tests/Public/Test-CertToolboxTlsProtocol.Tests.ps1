@@ -97,6 +97,43 @@ Describe 'Test-CertToolboxTlsProtocol' -Tag Unit {
         Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 1 -Exactly -ParameterFilter { -not $StartTls }
     }
 
+    It 'reports the address that answered, and none when the connection failed without a chosen address' {
+        $results = @(Test-CertToolboxTlsProtocol -HostName 'test.example' -Protocol Tls11, Tls12)
+
+        ($results | Where-Object Protocol -eq 'Tls12').RemoteAddress | Should -Be '192.0.2.10'
+        ($results | Where-Object Protocol -eq 'Tls11').RemoteAddress | Should -BeNullOrEmpty
+    }
+
+    It 'probes every version on each address with EveryAddress, naming the address even when it fails' {
+        Mock -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress {
+            [System.Net.IPAddress]::Parse('192.0.2.20')
+            [System.Net.IPAddress]::Parse('2001:db8::2')
+        }
+
+        $results = @(Test-CertToolboxTlsProtocol -HostName 'many.test.example' -EveryAddress -Protocol Tls11, Tls12)
+
+        $results.Count | Should -Be 4
+        # Tls12 succeeds (the address comes from the connection), Tls11 fails (it comes from the target).
+        (($results | Where-Object Protocol -eq 'Tls11').RemoteAddress -join ',') | Should -Be '192.0.2.20,2001:db8::2'
+        foreach ($expected in '192.0.2.20', '2001:db8::2') {
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 2 -Exactly -ParameterFilter { "$Address" -eq $expected }
+        }
+        Should -Invoke -ModuleName Posh-CertToolbox Write-CertToolboxLog -Times 2 -Exactly -ParameterFilter {
+            $Level -eq 'Information' -and $Target -eq 'many.test.example [2001:db8::2]:443'
+        }
+    }
+
+    It 'passes the address family on, and reports a name that does not resolve as an error' {
+        Test-CertToolboxTlsProtocol -HostName 'test.example' -AddressFamily IPv6 -Protocol Tls12 | Out-Null
+        Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe -Times 1 -Exactly -ParameterFilter { $AddressFamily -eq 'IPv6' -and $null -eq $Address }
+
+        Mock -ModuleName Posh-CertToolbox Resolve-CertToolboxHostAddress { throw [System.InvalidOperationException]::new("'gone.test.example' has no IPv4 address.") }
+        $output = @(Test-CertToolboxTlsProtocol -HostName 'gone.test.example' -EveryAddress -AddressFamily IPv4 -Protocol Tls12 2>&1)
+        $output.Count | Should -Be 1
+        $output[0] | Should -BeOfType [System.Management.Automation.ErrorRecord]
+        $output[0].TargetObject | Should -Be 'gone.test.example:443'
+    }
+
     It 'accepts several hosts from the pipeline' {
         $results = @('a.example', 'b.example' | Test-CertToolboxTlsProtocol -Protocol Tls12)
 

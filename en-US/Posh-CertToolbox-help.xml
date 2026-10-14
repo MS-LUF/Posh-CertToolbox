@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <helpItems schema="maml" xmlns="http://msh">
   <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
     <command:details>
@@ -16,6 +16,7 @@
       <maml:para>IssueWild is the same for wildcard certificates. When the record set has no "issuewild" record, wildcard issuance follows the "issue" records, and IssueWild repeats them.</maml:para>
       <maml:para>Record holds every record of the set as returned, including tags this cmdlet does not interpret.</maml:para>
       <maml:para>DNS is queried through Google's DNS-over-HTTPS API (dns.google), so it works identically on every platform; the names queried are sent to that service.</maml:para>
+      <maml:para>The default display leaves out the Record and QueriedName properties; pipe the result to Format-List with an asterisk to see every property.</maml:para>
     </maml:description>
     <command:syntax>
       <command:syntaxItem>
@@ -117,6 +118,303 @@
   </command:command>
   <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
     <command:details>
+      <command:name>Get-CertToolboxTlsCapability</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>CertToolboxTlsCapability</command:noun>
+      <maml:description>
+        <maml:para>Finds what a TLS server supports: protocol versions, cipher suites, key-exchange groups and a few handshake features.</maml:para>
+      </maml:description>
+    </command:details>
+    <maml:description>
+      <maml:para>Sends hand-built handshake openings and reads how the server answers, without ever completing a handshake. What is offered therefore does not depend on what this machine's own TLS stack has enabled, and the result is a statement about the server. This is the difference with Test-CertToolboxTlsProtocol, which tells what this machine can negotiate; comparing the two shows whether a failure is the server's or the client's.</maml:para>
+      <maml:para>Protocol lists each version probed, whether the server accepts it, how many cipher suites it accepts for it, and otherwise why not (the alert it sent, or what it answered instead).</maml:para>
+      <maml:para>CipherSuite lists every suite accepted, per version, in the order the server picks them, from the whole IANA registry. ForwardSecrecy, AuthenticatedEncryption and Weak are facts read from the suite's name; Weak marks suites with no encryption, no server authentication, an export-grade key, or RC4, RC2, DES, 3DES, IDEA or MD5. ServerCipherOrder, in Protocol, tells whether that order is imposed by the server or merely follows the order of the offer.</maml:para>
+      <maml:para>Group lists the key-exchange groups accepted, for TLS 1.3 and for the highest earlier version the server accepts.</maml:para>
+      <maml:para>OcspStapling, SecureRenegotiation, ExtendedMasterSecret and WireChain (the certificate chain exactly as sent, duplicates and order included) are read from a handshake of TLS 1.2 or earlier. They are empty for a server that only accepts TLS 1.3, where everything after the first server message is encrypted.</maml:para>
+      <maml:para>A full scan makes one connection per accepted cipher suite and per group tried, typically 20 to 60 per host, and the server will see each as an abandoned handshake. Use the Protocol parameter to narrow it. SSL 2.0 is not probed.</maml:para>
+      <maml:para>The default display is a summary: the accepted versions, the number of cipher suites and how many are weak, the group names. The Protocol, CipherSuite, Group and WireChain properties hold the full lists, each shown as a table; pipe the result to Format-List with an asterisk to see every property.</maml:para>
+    </maml:description>
+    <command:syntax>
+      <command:syntaxItem>
+        <maml:name>Get-CertToolboxTlsCapability</maml:name>
+        <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+          <maml:name>HostName</maml:name>
+          <maml:description>
+            <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>Port</maml:name>
+          <maml:description>
+            <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>443</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+          <maml:name>TargetHost</maml:name>
+          <maml:description>
+            <maml:para>Server name to send, when it differs from HostName.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>Protocol</maml:name>
+          <maml:description>
+            <maml:para>The protocol versions to probe. Defaults to all of Ssl3, Tls, Tls11, Tls12 and Tls13.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+          <dev:type>
+            <maml:name>String[]</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>@('Ssl3', 'Tls', 'Tls11', 'Tls12', 'Tls13')</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>TimeoutSec</maml:name>
+          <maml:description>
+            <maml:para>Timeout, in seconds, for each connection and each read.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+          <dev:type>
+            <maml:name>Int32</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>10</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+          <maml:name>StartTls</maml:name>
+          <maml:description>
+            <maml:para>The mail protocol to speak in plaintext before TLS: Smtp, Imap or Pop3. The exchange is repeated on every connection.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>SmtpEhloName</maml:name>
+          <maml:description>
+            <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>EveryAddress</maml:name>
+          <maml:description>
+            <maml:para>Scans every IP address the name resolves to, instead of the first one that answers, and returns one result per address; RemoteAddress tells them apart. The whole scan is repeated for each address, so the number of connections is multiplied accordingly: combine it with the Protocol parameter.</maml:para>
+          </maml:description>
+          <dev:type>
+            <maml:name>SwitchParameter</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>False</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>AddressFamily</maml:name>
+          <maml:description>
+            <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName, ByValue)" position="1" aliases="ComputerName, DnsName">
+        <maml:name>HostName</maml:name>
+        <maml:description>
+          <maml:para>One or more DNS names or IP addresses to connect to.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>Port</maml:name>
+        <maml:description>
+          <maml:para>TCP port. Defaults to 443, or with StartTls to the protocol's standard port: 25 for Smtp, 143 for Imap, 110 for Pop3.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>443</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="ServerName, SNI">
+        <maml:name>TargetHost</maml:name>
+        <maml:description>
+          <maml:para>Server name to send, when it differs from HostName.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>Protocol</maml:name>
+        <maml:description>
+          <maml:para>The protocol versions to probe. Defaults to all of Ssl3, Tls, Tls11, Tls12 and Tls13.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String[]</command:parameterValue>
+        <dev:type>
+          <maml:name>String[]</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>@('Ssl3', 'Tls', 'Tls11', 'Tls12', 'Tls13')</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>TimeoutSec</maml:name>
+        <maml:description>
+          <maml:para>Timeout, in seconds, for each connection and each read.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">Int32</command:parameterValue>
+        <dev:type>
+          <maml:name>Int32</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>10</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="True (ByPropertyName)" position="named" aliases="none">
+        <maml:name>StartTls</maml:name>
+        <maml:description>
+          <maml:para>The mail protocol to speak in plaintext before TLS: Smtp, Imap or Pop3. The exchange is repeated on every connection.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>SmtpEhloName</maml:name>
+        <maml:description>
+          <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>EveryAddress</maml:name>
+        <maml:description>
+          <maml:para>Scans every IP address the name resolves to, instead of the first one that answers, and returns one result per address; RemoteAddress tells them apart. The whole scan is repeated for each address, so the number of connections is multiplied accordingly: combine it with the Protocol parameter.</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
+        <dev:type>
+          <maml:name>SwitchParameter</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>False</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>AddressFamily</maml:name>
+        <maml:description>
+          <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+    </command:parameters>
+    <command:inputTypes>
+      <command:inputType>
+        <dev:type>
+          <maml:name>System.String. Host names as strings, or objects with HostName, Port, TargetHost and StartTls properties.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:inputType>
+    </command:inputTypes>
+    <command:returnValues>
+      <command:returnValue>
+        <dev:type>
+          <maml:name>PSCustomObject (type name CertToolbox.TlsCapability), one per host.</maml:name>
+        </dev:type>
+        <maml:description>
+          <maml:para></maml:para>
+        </maml:description>
+      </command:returnValue>
+    </command:returnValues>
+    <maml:alertSet>
+      <maml:alert>
+        <maml:para></maml:para>
+      </maml:alert>
+    </maml:alertSet>
+    <command:examples>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 1 --------------------------</maml:title>
+        <dev:code>(Get-CertToolboxTlsCapability -HostName 'www.example.com').Protocol | Format-Table</dev:code>
+        <dev:remarks>
+          <maml:para>Scans a server and shows which protocol versions it accepts.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 2 --------------------------</maml:title>
+        <dev:code>(Get-CertToolboxTlsCapability -HostName 'www.example.com').CipherSuite | Format-Table Protocol, Order, Name, ForwardSecrecy, Weak</dev:code>
+        <dev:remarks>
+          <maml:para>Shows the cipher suites the server accepts, per version, in the order it picks them.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 3 --------------------------</maml:title>
+        <dev:code>(Get-CertToolboxTlsCapability 'www.example.com').CipherSuite | Where-Object Weak</dev:code>
+        <dev:remarks>
+          <maml:para>Lists the weak cipher suites a server still accepts.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 4 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxTlsCapability -HostName 'mail.example.com' -StartTls Smtp -Protocol Tls12, Tls13</dev:code>
+        <dev:remarks>
+          <maml:para>Scans a mail server on port 25 for TLS 1.2 and 1.3 only.</maml:para>
+        </dev:remarks>
+      </command:example>
+    </command:examples>
+    <command:relatedLinks />
+  </command:command>
+  <command:command xmlns:maml="http://schemas.microsoft.com/maml/2004/10" xmlns:command="http://schemas.microsoft.com/maml/dev/command/2004/10" xmlns:dev="http://schemas.microsoft.com/maml/dev/2004/10" xmlns:MSHelp="http://msdn.microsoft.com/mshelp">
+    <command:details>
       <command:name>Get-CertToolboxTlsCertificate</command:name>
       <command:verb>Get</command:verb>
       <command:noun>CertToolboxTlsCertificate</command:noun>
@@ -135,7 +433,9 @@
       <maml:para>The handshake is done by the operating system's TLS stack. The protocol versions and cipher suites that can be offered therefore depend on the machine this runs on, and CipherSuite is only available under PowerShell 7 and later.</maml:para>
       <maml:para>Mail servers that start in plaintext and upgrade to TLS are reached with the StartTls parameter: the cmdlet speaks just enough SMTP, IMAP or POP3 to check that the server offers the upgrade and to request it, then does the same handshake. Use the Verbose switch to see that dialogue.</maml:para>
       <maml:para>With the TestCertificateUrl switch, every CRL, OCSP and issuer-certificate (CA Issuers) URL found in the certificates of both chains is requested, and the UrlTest property lists one result per certificate and URL: whether it answered, the dates it gave, and a Result. For a CRL the Result is NotRevoked, Revoked or CrlExpired; for OCSP it is Good, Revoked, Unknown or ResponderError; for CA Issuers it is IssuerMatch, IssuerMismatch or NotACertificate; and for any of them Failed (no usable answer) or Skipped (not testable, with the reason in Detail).</maml:para>
-      <maml:para>These tests show whether the revocation and issuer infrastructure answers and what it says. They do not verify the signature of a CRL or of an OCSP response, so they are a diagnosis and not a trust decision; CheckRevocation gives the operating system's own verdict. They contact the certificate authorities' servers, over plain HTTP as those URLs require.</maml:para>
+      <maml:para>The signature of each CRL and OCSP answer is verified against the certificate's issuer and shown in the Signature column: Valid, Invalid, or NotVerified when it could not be checked (the reason is in Detail). An OCSP answer must also be about the certificate asked for, and may be signed by a responder certificate the issuer delegated to. When the signature is Invalid, the Result becomes InvalidSignature, because such an answer proves nothing.</maml:para>
+      <maml:para>These tests show whether the revocation and issuer infrastructure answers and what it says. A valid signature means the answer comes from the issuer found in these chains; whether that issuer is itself trusted is not decided here, so this remains a diagnosis and CheckRevocation gives the operating system's own verdict. The tests contact the certificate authorities' servers, over plain HTTP as those URLs require.</maml:para>
+      <maml:para>The default display is a summary of about ten lines, and some of them are computed for display and are not property names: Endpoint, Cipher, Chain, and the Subject, Issuer and NotAfter of the leaf, which are read from the Certificate property. Pipe the result to Format-List with an asterisk to see every property, or to Format-Table for one line per result. The certificates of a chain are shown as a table.</maml:para>
     </maml:description>
     <command:syntax>
       <command:syntaxItem>
@@ -245,6 +545,29 @@
             <maml:uri />
           </dev:type>
           <dev:defaultValue>False</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>EveryAddress</maml:name>
+          <maml:description>
+            <maml:para>Probes every IP address the name resolves to, instead of the first one that answers, and returns one result per address; RemoteAddress tells them apart. Use it to find a node behind a load-balanced name that serves a different certificate or chain. An address that cannot be reached is an error for that address only. The addresses are the ones this machine's resolver returns.</maml:para>
+          </maml:description>
+          <dev:type>
+            <maml:name>SwitchParameter</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>False</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>AddressFamily</maml:name>
+          <maml:description>
+            <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name. With EveryAddress it limits the addresses probed; without it, it chooses which family to connect over.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -357,6 +680,30 @@
         </dev:type>
         <dev:defaultValue>False</dev:defaultValue>
       </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>EveryAddress</maml:name>
+        <maml:description>
+          <maml:para>Probes every IP address the name resolves to, instead of the first one that answers, and returns one result per address; RemoteAddress tells them apart. Use it to find a node behind a load-balanced name that serves a different certificate or chain. An address that cannot be reached is an error for that address only. The addresses are the ones this machine's resolver returns.</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
+        <dev:type>
+          <maml:name>SwitchParameter</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>False</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>AddressFamily</maml:name>
+        <maml:description>
+          <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name. With EveryAddress it limits the addresses probed; without it, it chooses which family to connect over.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
     </command:parameters>
     <command:inputTypes>
       <command:inputType>
@@ -414,9 +761,16 @@
       </command:example>
       <command:example>
         <maml:title>-------------------------- EXAMPLE 5 --------------------------</maml:title>
-        <dev:code>(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, NextUpdate, Url</dev:code>
+        <dev:code>(Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, Signature, NextUpdate, Url</dev:code>
         <dev:remarks>
           <maml:para>Tests the CRL, OCSP and CA Issuers URLs of every certificate of both chains.</maml:para>
+        </dev:remarks>
+      </command:example>
+      <command:example>
+        <maml:title>-------------------------- EXAMPLE 6 --------------------------</maml:title>
+        <dev:code>Get-CertToolboxTlsCertificate 'www.example.com' -EveryAddress | Group-Object { $_.Certificate.Thumbprint } | Select-Object Count, Name</dev:code>
+        <dev:remarks>
+          <maml:para>Probes every address behind the name and shows whether they all serve the same certificate.</maml:para>
         </dev:remarks>
       </command:example>
     </command:examples>
@@ -435,6 +789,7 @@
       <maml:para>Makes a separate connection for each protocol version, offering only that version, and returns one result per version.</maml:para>
       <maml:para>Read the Negotiated property as "could be negotiated from this machine", not as "the server supports it". The handshake is done by the operating system's TLS stack, and a version that the local system has disabled or does not implement fails here whatever the server accepts; ErrorType and ErrorMessage carry the underlying failure so the two cases can be told apart. A $true result is always conclusive; a $false one only is when the same version works from this machine against another server.</maml:para>
       <maml:para>Mail servers that start in plaintext and upgrade to TLS are probed with the StartTls parameter; the plaintext exchange is then repeated on each connection. When that exchange itself fails (the server does not offer the upgrade, for instance), every version is reported as not negotiated with that error.</maml:para>
+      <maml:para>The default display is a table of the main columns; pipe the result to Format-List with an asterisk to see every property, the negotiated cipher suite among them.</maml:para>
     </maml:description>
     <command:syntax>
       <command:syntaxItem>
@@ -523,6 +878,29 @@
           </dev:type>
           <dev:defaultValue>None</dev:defaultValue>
         </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>EveryAddress</maml:name>
+          <maml:description>
+            <maml:para>Probes every IP address the name resolves to, instead of the first one that answers, and returns one set of results per address; RemoteAddress tells them apart. An address that cannot be reached shows as not negotiated for every version, with the error.</maml:para>
+          </maml:description>
+          <dev:type>
+            <maml:name>SwitchParameter</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>False</dev:defaultValue>
+        </command:parameter>
+        <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+          <maml:name>AddressFamily</maml:name>
+          <maml:description>
+            <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name.</maml:para>
+          </maml:description>
+          <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+          <dev:type>
+            <maml:name>String</maml:name>
+            <maml:uri />
+          </dev:type>
+          <dev:defaultValue>None</dev:defaultValue>
+        </command:parameter>
       </command:syntaxItem>
     </command:syntax>
     <command:parameters>
@@ -602,6 +980,30 @@
         <maml:name>SmtpEhloName</maml:name>
         <maml:description>
           <maml:para>The name announced in the SMTP EHLO command, with StartTls Smtp. Defaults to this machine's host name.</maml:para>
+        </maml:description>
+        <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
+        <dev:type>
+          <maml:name>String</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>None</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>EveryAddress</maml:name>
+        <maml:description>
+          <maml:para>Probes every IP address the name resolves to, instead of the first one that answers, and returns one set of results per address; RemoteAddress tells them apart. An address that cannot be reached shows as not negotiated for every version, with the error.</maml:para>
+        </maml:description>
+        <command:parameterValue required="false" variableLength="false">SwitchParameter</command:parameterValue>
+        <dev:type>
+          <maml:name>SwitchParameter</maml:name>
+          <maml:uri />
+        </dev:type>
+        <dev:defaultValue>False</dev:defaultValue>
+      </command:parameter>
+      <command:parameter required="false" variableLength="true" globbing="false" pipelineInput="False" position="named" aliases="none">
+        <maml:name>AddressFamily</maml:name>
+        <maml:description>
+          <maml:para>Uses only the IPv4 or only the IPv6 addresses of the name.</maml:para>
         </maml:description>
         <command:parameterValue required="true" variableLength="false">String</command:parameterValue>
         <dev:type>

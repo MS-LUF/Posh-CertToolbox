@@ -43,11 +43,24 @@ function Get-CertToolboxTlsCertificate {
         IssuerMismatch or NotACertificate; and for any of them Failed (no usable answer) or
         Skipped (not testable, with the reason in Detail).
 
+        The signature of each CRL and OCSP answer is verified against the certificate's issuer
+        and shown in the Signature column: Valid, Invalid, or NotVerified when it could not be
+        checked (the reason is in Detail). An OCSP answer must also be about the certificate
+        asked for, and may be signed by a responder certificate the issuer delegated to. When
+        the signature is Invalid, the Result becomes InvalidSignature, because such an answer
+        proves nothing.
+
         These tests show whether the revocation and issuer infrastructure answers and what it
-        says. They do not verify the signature of a CRL or of an OCSP response, so they are a
-        diagnosis and not a trust decision; CheckRevocation gives the operating system's own
-        verdict. They contact the certificate authorities' servers, over plain HTTP as those
-        URLs require.
+        says. A valid signature means the answer comes from the issuer found in these chains;
+        whether that issuer is itself trusted is not decided here, so this remains a diagnosis
+        and CheckRevocation gives the operating system's own verdict. The tests contact the
+        certificate authorities' servers, over plain HTTP as those URLs require.
+
+        The default display is a summary of about ten lines, and some of them are computed
+        for display and are not property names: Endpoint, Cipher, Chain, and the Subject,
+        Issuer and NotAfter of the leaf, which are read from the Certificate property. Pipe
+        the result to Format-List with an asterisk to see every property, or to Format-Table
+        for one line per result. The certificates of a chain are shown as a table.
     .PARAMETER HostName
         One or more DNS names or IP addresses to connect to.
     .PARAMETER Port
@@ -74,6 +87,15 @@ function Get-CertToolboxTlsCertificate {
         Also requests every CRL, OCSP and CA Issuers URL found in the certificates of both
         chains, and reports the outcome in the UrlTest property. TimeoutSec applies to each
         request.
+    .PARAMETER EveryAddress
+        Probes every IP address the name resolves to, instead of the first one that answers,
+        and returns one result per address; RemoteAddress tells them apart. Use it to find a
+        node behind a load-balanced name that serves a different certificate or chain. An
+        address that cannot be reached is an error for that address only. The addresses are
+        the ones this machine's resolver returns.
+    .PARAMETER AddressFamily
+        Uses only the IPv4 or only the IPv6 addresses of the name. With EveryAddress it limits
+        the addresses probed; without it, it chooses which family to connect over.
     .INPUTS
         System.String. Host names as strings, or objects with HostName, Port, TargetHost and StartTls properties.
     .OUTPUTS
@@ -93,9 +115,13 @@ function Get-CertToolboxTlsCertificate {
 
         Inspects the certificate of a mail submission server, showing the SMTP dialogue.
     .EXAMPLE
-        (Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, NextUpdate, Url
+        (Get-CertToolboxTlsCertificate 'www.example.com' -TestCertificateUrl).UrlTest | Format-Table Subject, Chain, Type, Result, Signature, NextUpdate, Url
 
         Tests the CRL, OCSP and CA Issuers URLs of every certificate of both chains.
+    .EXAMPLE
+        Get-CertToolboxTlsCertificate 'www.example.com' -EveryAddress | Group-Object { $_.Certificate.Thumbprint } | Select-Object Count, Name
+
+        Probes every address behind the name and shows whether they all serve the same certificate.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -133,7 +159,14 @@ function Get-CertToolboxTlsCertificate {
         [string] $SmtpEhloName,
 
         [Parameter()]
-        [switch] $TestCertificateUrl
+        [switch] $TestCertificateUrl,
+
+        [Parameter()]
+        [switch] $EveryAddress,
+
+        [Parameter()]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string] $AddressFamily
     )
 
     begin {
@@ -150,7 +183,13 @@ function Get-CertToolboxTlsCertificate {
     }
 
     process {
-        foreach ($item in $HostName) {
+        $targetParameter = @{ HostName = $HostName; EveryAddress = $EveryAddress }
+        if ($AddressFamily) {
+            $targetParameter.AddressFamily = $AddressFamily
+        }
+
+        foreach ($entry in (Get-CertToolboxProbeTarget @targetParameter)) {
+            $item = $entry.HostName
             $serverName = $TargetHost
             if (-not $serverName) {
                 $serverName = $item
@@ -178,13 +217,28 @@ function Get-CertToolboxTlsCertificate {
                 }
             }
 
+            $target = "$($entry.Label):$endpointPort"
+            if ($entry.Error) {
+                Write-CertToolboxLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
+                    -Target $target -Message "The name could not be resolved: $($entry.Error.Message)"
+                $PSCmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
+                        $entry.Error, 'TlsConnectionFailed', [System.Management.Automation.ErrorCategory]::ConnectionError, $target))
+                continue
+            }
+            if ($entry.Address) {
+                $probeParameter.Address = $entry.Address
+            }
+            if ($AddressFamily) {
+                $probeParameter.AddressFamily = $AddressFamily
+            }
+
             try {
-                Write-Verbose "TLS handshake with ${item}:$endpointPort (server name '$serverName', protocols $sslProtocol, StartTls '$StartTls')."
+                Write-Verbose "TLS handshake with $target (server name '$serverName', protocols $sslProtocol, StartTls '$StartTls')."
                 $probe = Invoke-CertToolboxTlsProbe @probeParameter
 
                 if (@($probe.StartTlsDialogue).Count -gt 0) {
                     Write-CertToolboxLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
-                        -Target "${item}:$endpointPort" -Message "$StartTls dialogue before TLS: $(@($probe.StartTlsDialogue) -join ' | ')"
+                        -Target $target -Message "$StartTls dialogue before TLS: $(@($probe.StartTlsDialogue) -join ' | ')"
                 }
 
                 $serverCertificate = @($probe.ServerCertificate)
@@ -207,7 +261,7 @@ function Get-CertToolboxTlsCertificate {
                     $summary += "; validation failed: $(@($policyError + @($probe.ChainStatus)) -join ', ')."
                 }
                 Write-CertToolboxLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
-                    -Target "${item}:$endpointPort" -Message $summary
+                    -Target $target -Message $summary
 
                 $startTlsValue = $null
                 if ($StartTls) {
@@ -227,7 +281,7 @@ function Get-CertToolboxTlsCertificate {
                         $urlSummary += ': ' + (@($problem | ForEach-Object { "$($_.Type) $($_.Url) -> $($_.Result)" }) -join '; ')
                     }
                     Write-CertToolboxLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
-                        -Target "${item}:$endpointPort" -Message "$urlSummary."
+                        -Target $target -Message "$urlSummary."
                 }
 
                 [PSCustomObject]@{
@@ -259,9 +313,9 @@ function Get-CertToolboxTlsCertificate {
             } catch {
                 $exception = Resolve-CertToolboxException -Exception $_.Exception
                 Write-CertToolboxLog -Config $config -Level Error -CmdletName $MyInvocation.MyCommand.Name `
-                    -Target "${item}:$endpointPort" -Message "Connection or handshake failed: $($exception.GetType().Name): $($exception.Message)"
+                    -Target $target -Message "Connection or handshake failed: $($exception.GetType().Name): $($exception.Message)"
                 $PSCmdlet.WriteError([System.Management.Automation.ErrorRecord]::new(
-                        $exception, 'TlsConnectionFailed', [System.Management.Automation.ErrorCategory]::ConnectionError, "${item}:$endpointPort"))
+                        $exception, 'TlsConnectionFailed', [System.Management.Automation.ErrorCategory]::ConnectionError, $target))
             }
         }
     }
