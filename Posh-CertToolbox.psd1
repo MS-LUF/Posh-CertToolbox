@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Posh-CertToolbox.psm1'
-    ModuleVersion     = '0.9.0'
+    ModuleVersion     = '0.9.1'
     GUID              = 'b7e4c1a2-5f3d-4e8a-9c6b-2d1f0a7e8c34'
     Author            = 'MS-LUF'
     CompanyName       = 'lucas-cueff.com'
@@ -22,7 +22,7 @@
         PSData = @{
             Tags         = @('TLS', 'SSL', 'X509', 'Certificate', 'CAA', 'DNS', 'Security', 'Troubleshooting')
             LicenseUri   = 'https://opensource.org/licenses/artistic-license-2.0'
-            ReleaseNotes = 'v0.9.0 - Short default display for every result; the objects are unchanged. See the change log in README.md.'
+            ReleaseNotes = 'v0.9.1 - Fix: on macOS, ServerChain is now what the server sent. See the change log in README.md.'
         }
     }
 }

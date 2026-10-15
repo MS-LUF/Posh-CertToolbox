@@ -108,7 +108,14 @@ and `CipherStrength` are filled on both.
 
 A server is supposed to send its leaf certificate and every intermediate up to, but not
 including, the root. When it does not, some clients still succeed because they find the missing
-certificate in their own store or download it, and others fail. One call shows both sides:
+certificate in their own store or download it, and others fail. One call shows both sides.
+
+On macOS the system's TLS stack reports the chain it completed itself instead of what the
+server sent, so the cmdlet reads `ServerChain` from a separate, hand-built TLS 1.2 handshake
+opening to the same address, and `ServerChainSource` says `RawHello` (it is `TlsStack` on
+Windows and Linux). A server that only accepts TLS 1.3 encrypts its certificates: on macOS its
+`ServerChainSource` is then `Unavailable`, `ServerChain` is empty, `MissingIntermediate`,
+`ServerSentRoot` and `UnusedServerCertificate` are `$null`, and a warning says why.
 
 ```powershell
 $r = Get-CertToolboxTlsCertificate 'incomplete-chain.badssl.com'

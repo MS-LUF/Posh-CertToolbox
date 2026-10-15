@@ -26,6 +26,17 @@ ServerChain holds the certificates the server actually sent, leaf first.
 This is what
 every client receives, whatever its own stores contain.
 
+On macOS the operating system's TLS stack reports the chain it completed itself, with
+the intermediates it fetched and the root it added, rather than what the server sent.
+ServerChain is therefore read there from a separate, hand-built TLS 1.2 handshake
+opening to the same address, which costs one more connection.
+ServerChainSource says
+where ServerChain comes from: TlsStack (Windows and Linux), RawHello (macOS), or
+Unavailable.
+Unavailable happens on macOS when the server only accepts TLS 1.3, which
+encrypts its certificates, or when that extra connection fails; ServerChain is then
+empty, the three comparison properties are null, and a warning says why.
+
 LocalChain holds the chain this machine built to a root, using the server's
 certificates, its own certificate stores and, where the platform does it, downloaded
 intermediates.

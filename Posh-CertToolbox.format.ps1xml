@@ -79,7 +79,13 @@
               </ListItem>
               <ListItem>
                 <Label>Chain</Label>
-                <ScriptBlock>"$(@($_.ServerChain).Count) sent by the server, $(@($_.LocalChain).Count) in the local chain"</ScriptBlock>
+                <ScriptBlock>if ($_.ServerChainSource -eq 'Unavailable') { $sent = 'unknown number' } else { $sent = @($_.ServerChain).Count }; "$sent sent by the server, $(@($_.LocalChain).Count) in the local chain"</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ServerChainSource</PropertyName>
+                <ItemSelectionCondition>
+                  <ScriptBlock>$_.ServerChainSource -ne 'TlsStack'</ScriptBlock>
+                </ItemSelectionCondition>
               </ListItem>
               <ListItem>
                 <Label>MissingIntermediate</Label>

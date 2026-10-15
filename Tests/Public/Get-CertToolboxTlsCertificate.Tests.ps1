@@ -8,6 +8,104 @@ Describe 'Get-CertToolboxTlsCertificate' -Tag Unit {
     BeforeEach {
         Mock -ModuleName Posh-CertToolbox Read-CertToolboxConfigFile { [PSCustomObject]@{ version = '1.0' } }
         Mock -ModuleName Posh-CertToolbox Write-CertToolboxLog {}
+        # Whatever machine runs the tests; the macOS path is tested in its own context.
+        Mock -ModuleName Posh-CertToolbox Get-CertToolboxPlatform { 'Windows' }
+        Mock -ModuleName Posh-CertToolbox Get-CertToolboxWireChain { throw 'Get-CertToolboxWireChain must not be called here.' }
+    }
+
+    Context 'macOS' {
+        BeforeEach {
+            Mock -ModuleName Posh-CertToolbox Get-CertToolboxPlatform { 'MacOS' }
+            # What the macOS stack reports: the chain it completed, root included.
+            $script:probeResult = Get-TestTlsProbeResult `
+                -ServerCertificate $script:chain.Leaf, $script:chain.Intermediate, $script:chain.Root `
+                -LocalCertificate $script:chain.Leaf, $script:chain.Intermediate, $script:chain.Root
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe { $script:probeResult }
+            # What the server really sent: its leaf alone.
+            Mock -ModuleName Posh-CertToolbox Get-CertToolboxWireChain {
+                [PSCustomObject]@{ Certificate = @($script:chain.Leaf); Version = 0x0303; Reason = $null }
+            }
+        }
+
+        It 'reads the server chain from the wire, at the address of the handshake, and compares that' {
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example' -Port 8443 -TargetHost 'name.test.example' -TimeoutSec 4
+
+            $result.ServerChainSource | Should -Be 'RawHello'
+            @($result.ServerChain).Count | Should -Be 1
+            $result.ServerChain[0].Thumbprint | Should -Be $script:chain.Leaf.Thumbprint
+            @($result.MissingIntermediate).Count | Should -Be 1
+            $result.MissingIntermediate[0].Thumbprint | Should -Be $script:chain.Intermediate.Thumbprint
+            $result.ServerSentRoot | Should -BeFalse
+            $result.Certificate.Thumbprint | Should -Be $script:chain.Leaf.Thumbprint
+            Should -Invoke -ModuleName Posh-CertToolbox Get-CertToolboxWireChain -Times 1 -Exactly -ParameterFilter {
+                $Connection.HostName -eq 'test.example' -and $Connection.Port -eq 8443 -and $Connection.TargetHost -eq 'name.test.example' -and
+                $Connection.TimeoutMs -eq 4000 -and "$($Connection.Address)" -eq '192.0.2.10' -and -not $Connection.ContainsKey('StartTls')
+            }
+        }
+
+        It 'passes the STARTTLS settings and the address family on' {
+            Get-CertToolboxTlsCertificate -HostName 'mail.test.example' -StartTls Smtp -SmtpEhloName 'client.test.example' -AddressFamily IPv4 | Out-Null
+
+            Should -Invoke -ModuleName Posh-CertToolbox Get-CertToolboxWireChain -Times 1 -Exactly -ParameterFilter {
+                $Connection.Port -eq 25 -and $Connection.StartTls -eq 'Smtp' -and $Connection.SmtpEhloName -eq 'client.test.example' -and $Connection.AddressFamily -eq 'IPv4'
+            }
+        }
+
+        It 'tests the URLs against the chain read from the wire' {
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest { }
+
+            Get-CertToolboxTlsCertificate -HostName 'test.example' -TestCertificateUrl | Out-Null
+
+            Should -Invoke -ModuleName Posh-CertToolbox Invoke-CertToolboxCertificateUrlTest -Times 1 -Exactly -ParameterFilter {
+                $ServerCertificate.Count -eq 1 -and $LocalCertificate.Count -eq 3
+            }
+        }
+
+        It 'reports the chain as unavailable, with a warning, when it cannot be read' {
+            Mock -ModuleName Posh-CertToolbox Get-CertToolboxWireChain {
+                [PSCustomObject]@{ Certificate = @(); Version = $null; Reason = "The server refused TLS 1.2 and earlier with the alert 'protocol_version'." }
+            }
+
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example' -WarningVariable warned -WarningAction SilentlyContinue
+
+            $result.ServerChainSource | Should -Be 'Unavailable'
+            $result.ServerChain | Should -BeNullOrEmpty
+            $null -eq $result.MissingIntermediate | Should -BeTrue
+            $null -eq $result.ServerSentRoot | Should -BeTrue
+            $null -eq $result.UnusedServerCertificate | Should -BeTrue
+            $result.Certificate.Thumbprint | Should -Be $script:chain.Leaf.Thumbprint
+            "$warned" | Should -BeLike "test.example:443: the certificate chain the server sent could not be read.*protocol_version*"
+
+            $text = $result | Out-String -Width 250
+            $text | Should -Match '(?m)^Chain\s+: unknown number sent by the server, 3 in the local chain\s*$'
+            $text | Should -Match '(?m)^ServerChainSource\s+: Unavailable\s*$'
+        }
+
+        It 'does not mix two certificates when the wire shows another leaf' {
+            Mock -ModuleName Posh-CertToolbox Get-CertToolboxWireChain {
+                [PSCustomObject]@{ Certificate = @($script:chain.Intermediate); Version = 0x0303; Reason = $null }
+            }
+
+            $result = Get-CertToolboxTlsCertificate -HostName 'test.example' -WarningVariable warned -WarningAction SilentlyContinue
+
+            $result.ServerChainSource | Should -Be 'Unavailable'
+            "$warned" | Should -BeLike '*another certificate*'
+        }
+    }
+
+    Context 'Windows and Linux' {
+        It 'takes the server chain from the TLS stack and makes no other connection' {
+            $script:probeResult = Get-TestTlsProbeResult -ServerCertificate $script:chain.Leaf -LocalCertificate $script:chain.Leaf
+            Mock -ModuleName Posh-CertToolbox Invoke-CertToolboxTlsProbe { $script:probeResult }
+
+            foreach ($platform in 'Windows', 'Linux') {
+                $script:platform = $platform
+                Mock -ModuleName Posh-CertToolbox Get-CertToolboxPlatform { $script:platform }
+
+                (Get-CertToolboxTlsCertificate -HostName 'test.example').ServerChainSource | Should -Be 'TlsStack'
+            }
+            Should -Invoke -ModuleName Posh-CertToolbox Get-CertToolboxWireChain -Times 0 -Exactly
+        }
     }
 
     Context 'logging' {

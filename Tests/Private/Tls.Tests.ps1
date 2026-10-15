@@ -86,6 +86,22 @@ Describe 'Private/Tls' -Tag Unit {
             }
         }
 
+        Describe 'Get-CertToolboxPlatform' {
+            It 'names the platform this runs on' {
+                $expected = 'Windows'
+                if ((Get-Variable -Name 'IsMacOS' -ValueOnly -ErrorAction SilentlyContinue)) {
+                    $expected = 'MacOS'
+                } elseif ((Get-Variable -Name 'IsLinux' -ValueOnly -ErrorAction SilentlyContinue)) {
+                    $expected = 'Linux'
+                }
+
+                Get-CertToolboxPlatform | Should -BeExactly $expected
+                if ($PSVersionTable.PSVersion.Major -lt 6) {
+                    Get-CertToolboxPlatform | Should -BeExactly 'Windows'
+                }
+            }
+        }
+
         Describe 'Resolve-CertToolboxHostAddress' {
             It 'returns an IP address given in place of a name as is' {
                 $addresses = @(Resolve-CertToolboxHostAddress -HostName '192.0.2.10')

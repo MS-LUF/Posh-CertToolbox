@@ -9,6 +9,15 @@ function Get-CertToolboxTlsCertificate {
         ServerChain holds the certificates the server actually sent, leaf first. This is what
         every client receives, whatever its own stores contain.
 
+        On macOS the operating system's TLS stack reports the chain it completed itself, with
+        the intermediates it fetched and the root it added, rather than what the server sent.
+        ServerChain is therefore read there from a separate, hand-built TLS 1.2 handshake
+        opening to the same address, which costs one more connection. ServerChainSource says
+        where ServerChain comes from: TlsStack (Windows and Linux), RawHello (macOS), or
+        Unavailable. Unavailable happens on macOS when the server only accepts TLS 1.3, which
+        encrypts its certificates, or when that extra connection fails; ServerChain is then
+        empty, the three comparison properties are null, and a warning says why.
+
         LocalChain holds the chain this machine built to a root, using the server's
         certificates, its own certificate stores and, where the platform does it, downloaded
         intermediates. Each element carries its own Status flags (empty when it has no error).
@@ -173,6 +182,7 @@ function Get-CertToolboxTlsCertificate {
         $config = Read-CertToolboxConfigFile
         Write-CertToolboxLog -Config $config -Level Debug -CmdletName $MyInvocation.MyCommand.Name `
             -Message 'Cmdlet invoked' -BoundParameters $PSBoundParameters
+        $platform = Get-CertToolboxPlatform
 
         $sslProtocol = [System.Security.Authentication.SslProtocols]::None
         foreach ($protocolName in $Protocol) {
@@ -245,11 +255,61 @@ function Get-CertToolboxTlsCertificate {
                 $localElement = @($probe.LocalChainElement)
                 $localCertificate = @($localElement | ForEach-Object { $_.Certificate })
 
-                $diagnostic = Get-CertToolboxChainDiagnostic -ServerCertificate $serverCertificate -LocalCertificate $localCertificate
-
                 $leaf = $null
                 if ($serverCertificate.Count -gt 0) {
                     $leaf = ConvertTo-CertToolboxCertificateInfo -Certificate $serverCertificate[0]
+                }
+
+                # On macOS the TLS stack reports the chain the system completed (intermediates it
+                # fetched, the root it added), not what the server sent. The server's own list is
+                # read from a hand-built handshake opening to the same address instead.
+                $serverChainSource = 'TlsStack'
+                if ($platform -eq 'MacOS') {
+                    $wireConnection = @{
+                        HostName   = $item
+                        Port       = $endpointPort
+                        TargetHost = $serverName
+                        TimeoutMs  = $TimeoutSec * 1000
+                    }
+                    if ($StartTls) {
+                        $wireConnection.StartTls = $StartTls
+                        if ($SmtpEhloName) {
+                            $wireConnection.SmtpEhloName = $SmtpEhloName
+                        }
+                    }
+                    [System.Net.IPAddress] $probedAddress = $null
+                    if ($probe.RemoteAddress -and [System.Net.IPAddress]::TryParse("$($probe.RemoteAddress)", [ref] $probedAddress)) {
+                        $wireConnection.Address = $probedAddress
+                    } elseif ($entry.Address) {
+                        $wireConnection.Address = $entry.Address
+                    }
+                    if ($AddressFamily) {
+                        $wireConnection.AddressFamily = $AddressFamily
+                    }
+
+                    Write-Verbose "Reading the chain $target sends from a hand-built handshake opening."
+                    $wire = Get-CertToolboxWireChain -Connection $wireConnection
+                    $wireCertificate = @($wire.Certificate)
+                    $wireReason = $wire.Reason
+                    if (-not $wireReason -and $serverCertificate.Count -gt 0 -and $wireCertificate[0].Thumbprint -ne $serverCertificate[0].Thumbprint) {
+                        $wireReason = 'The server sent another certificate to the hand-built handshake opening than to the TLS handshake.'
+                    }
+
+                    if ($wireReason) {
+                        $serverChainSource = 'Unavailable'
+                        $serverCertificate = @()
+                        Write-Warning "${target}: the certificate chain the server sent could not be read. $wireReason"
+                        Write-CertToolboxLog -Config $config -Level Information -CmdletName $MyInvocation.MyCommand.Name `
+                            -Target $target -Message "Server chain unavailable: $wireReason"
+                    } else {
+                        $serverChainSource = 'RawHello'
+                        $serverCertificate = $wireCertificate
+                    }
+                }
+
+                $diagnostic = $null
+                if ($serverChainSource -ne 'Unavailable') {
+                    $diagnostic = Get-CertToolboxChainDiagnostic -ServerCertificate $serverCertificate -LocalCertificate $localCertificate
                 }
 
                 $policyError = @("$($probe.PolicyErrors)" -split ',\s*' | Where-Object { $_ -and $_ -ne 'None' })
@@ -284,6 +344,15 @@ function Get-CertToolboxTlsCertificate {
                         -Target $target -Message "$urlSummary."
                 }
 
+                $missingIntermediate = $null
+                $serverSentRoot = $null
+                $unusedServerCertificate = $null
+                if ($diagnostic) {
+                    $missingIntermediate = @($diagnostic.MissingIntermediate | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_ })
+                    $serverSentRoot = $diagnostic.ServerSentRoot
+                    $unusedServerCertificate = @($diagnostic.UnusedServerCertificate | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_ })
+                }
+
                 [PSCustomObject]@{
                     PSTypeName              = 'CertToolbox.TlsCertificate'
                     HostName                = $item
@@ -303,10 +372,11 @@ function Get-CertToolboxTlsCertificate {
                     RevocationMode          = $probe.RevocationMode
                     Certificate             = $leaf
                     ServerChain             = @($serverCertificate | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_ })
+                    ServerChainSource       = $serverChainSource
                     LocalChain              = @($localElement | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_.Certificate -Status @($_.Status) })
-                    MissingIntermediate     = @($diagnostic.MissingIntermediate | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_ })
-                    ServerSentRoot          = $diagnostic.ServerSentRoot
-                    UnusedServerCertificate = @($diagnostic.UnusedServerCertificate | ForEach-Object { ConvertTo-CertToolboxCertificateInfo -Certificate $_ })
+                    MissingIntermediate     = $missingIntermediate
+                    ServerSentRoot          = $serverSentRoot
+                    UnusedServerCertificate = $unusedServerCertificate
                     UrlTest                 = $urlTest
                     ElapsedMs               = $probe.ElapsedMs
                 }

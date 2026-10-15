@@ -63,6 +63,7 @@ Get-CertToolboxCaaRecord www.example.com
 - **`-TestCertificateUrl` diagnoses, it does not decide trust.** It verifies that each CRL and OCSP answer is signed by the certificate's issuer, not that the issuer is trusted; `-CheckRevocation` gives the operating system's verdict.
 - **CAA lookups go through Google DNS-over-HTTPS** (`dns.google`): the names you query are sent to that service.
 - **Logging is off by default.** Copy `Config\Posh-CertToolbox.sample.json` to `$home\Posh-CertToolbox\Posh-CertToolbox-Config.json` and set `Logging.Enabled` to turn it on.
+- **On macOS, the server chain costs one more connection.** The system's TLS stack reports the chain it completed itself, so `ServerChain` is read from a separate TLS 1.2 handshake opening; a server that only accepts TLS 1.3 then reports it as `Unavailable`.
 - **Tested on Windows** (Windows PowerShell 5.1 and PowerShell 7) **and on Linux and macOS** (PowerShell 7).
 
 ## Tests
@@ -74,6 +75,7 @@ Invoke-Pester -Path .\Tests                                 # also real endpoint
 
 ## Change log
 
+- **0.9.1** — Fix: on macOS, `ServerChain` is now what the server sent (new `ServerChainSource`).
 - **0.9.0** — Short default display for every result; the objects are unchanged.
 - **0.8.0** — `-EveryAddress` and `-AddressFamily` on the three TLS cmdlets.
 - **0.7.0** — `Get-CertToolboxTlsCapability`: versions, cipher suites and groups a server supports.

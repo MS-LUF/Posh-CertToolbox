@@ -592,5 +592,80 @@ Describe 'Private/RawTls' -Tag Unit {
                 $result.ConnectionCount | Should -Be 1
             }
         }
+
+        Describe 'Get-CertToolboxWireChain' {
+            BeforeEach {
+                $script:connectionSettings = @{ HostName = 'server.test.example'; Port = 8443; TimeoutMs = 3000; Address = [System.Net.IPAddress]::Parse('192.0.2.10') }
+            }
+
+            It 'returns the certificates of the answer, in their order, from one TLS 1.2 opening offering every earlier suite' {
+                Mock Invoke-CertToolboxRawHello {
+                    [PSCustomObject]@{ ServerHello = $true; Version = 0x0303; Certificate = @($script:chain.Leaf, $script:chain.Intermediate); Complete = $true; Error = $null; Stage = $null }
+                }
+
+                $result = Get-CertToolboxWireChain -Connection $script:connectionSettings
+
+                $result.Reason | Should -BeNullOrEmpty
+                $result.Version | Should -Be 0x0303
+                (@($result.Certificate) | ForEach-Object { $_.Thumbprint }) -join ',' | Should -Be "$($script:chain.Leaf.Thumbprint),$($script:chain.Intermediate.Thumbprint)"
+                Should -Invoke Invoke-CertToolboxRawHello -Times 1 -Exactly -ParameterFilter {
+                    $HostName -eq 'server.test.example' -and $Port -eq 8443 -and "$Address" -eq '192.0.2.10' -and $Protocol -eq 'Tls12' -and
+                    $CipherSuite.Count -eq $script:CertToolboxLegacyCipherSuite.Count -and $Group.Count -gt 0
+                }
+            }
+
+            It 'keeps a lower version the server answers with, its certificates being readable as well' {
+                Mock Invoke-CertToolboxRawHello {
+                    [PSCustomObject]@{ ServerHello = $true; Version = 0x0301; Certificate = @($script:chain.Leaf); Complete = $true; Error = $null; Stage = $null }
+                }
+
+                $result = Get-CertToolboxWireChain -Connection $script:connectionSettings
+
+                $result.Reason | Should -BeNullOrEmpty
+                @($result.Certificate).Count | Should -Be 1
+            }
+
+            It 'explains why there is no chain: <Case>' -TestCases @(
+                @{ Case = 'connection failed'; Answer = @{ ServerHello = $false; Error = 'connection refused'; Stage = 'Connect' }; Expected = '*opening failed*connection refused*' }
+                @{ Case = 'TLS 1.2 refused'; Answer = @{ ServerHello = $false; Alert = 'protocol_version'; Error = $null }; Expected = "*alert 'protocol_version'*TLS 1.3*" }
+                @{ Case = 'no answer'; Answer = @{ ServerHello = $false; Alert = $null; Error = $null }; Expected = '*did not answer with a ServerHello*' }
+                @{ Case = 'no certificate read'; Answer = @{ ServerHello = $true; Version = 0x0303; Certificate = @(); Complete = $false; Error = $null }; Expected = '*could not be read*' }
+            ) {
+                param($Answer, $Expected)
+                $script:answer = [PSCustomObject]$Answer
+                Mock Invoke-CertToolboxRawHello { $script:answer }
+
+                $result = Get-CertToolboxWireChain -Connection $script:connectionSettings
+
+                $result.Reason | Should -BeLike $Expected
+                $result.Certificate | Should -BeNullOrEmpty
+            }
+        }
+    }
+}
+
+Describe 'Get-CertToolboxWireChain against real endpoints' -Tag Integration {
+    It 'reads exactly what a server sends: <HostName>' -TestCases @(
+        @{ HostName = 'incomplete-chain.badssl.com'; Count = 1 }
+        @{ HostName = 'www.google.com'; Count = 2 }
+    ) {
+        param($HostName, $Count)
+
+        $result = InModuleScope 'Posh-CertToolbox' -Parameters @{ HostName = $HostName } {
+            param($HostName)
+            Get-CertToolboxWireChain -Connection @{ HostName = $HostName; Port = 443; TimeoutMs = 10000 }
+        }
+
+        $result.Reason | Should -BeNullOrEmpty
+        $certificate = @($result.Certificate)
+        if ($Count -eq 1) {
+            # This server sends its leaf alone, whatever the client.
+            $certificate.Count | Should -Be 1
+        } else {
+            $certificate.Count | Should -BeGreaterOrEqual $Count
+        }
+        $certificate[0].Subject | Should -BeLike "CN=*$($HostName.Split('.', 2)[1])*"
+        # A server never sends twice the same certificate here, and none is added by a TLS stack.
+        @($certificate | Group-Object Thumbprint | Where-Object Count -gt 1) | Should -BeNullOrEmpty
     }
 }

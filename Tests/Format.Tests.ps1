@@ -85,6 +85,8 @@ Describe 'Default display' -Tag Unit {
     BeforeEach {
         Mock -ModuleName Posh-CertToolbox Read-CertToolboxConfigFile { [PSCustomObject]@{ version = '1.0' } }
         Mock -ModuleName Posh-CertToolbox Write-CertToolboxLog {}
+        # The display of the macOS chain source is tested with the cmdlet's macOS path.
+        Mock -ModuleName Posh-CertToolbox Get-CertToolboxPlatform { 'Windows' }
     }
 
     Context 'Get-CertToolboxTlsCertificate' {
@@ -109,14 +111,14 @@ Describe 'Default display' -Tag Unit {
             $text | Should -Match '(?m)^Chain\s+: 2 sent by the server, 3 in the local chain\s*$'
             @($text.Trim() -split "`n").Count | Should -BeLessThan 15
 
-            @($result.PSObject.Properties).Count | Should -Be 23
+            @($result.PSObject.Properties).Count | Should -Be 24
             ($result | Format-List * | Out-String) | Should -Match '(?m)^ElapsedMs\s+: 12'
         }
 
         It 'leaves out the lines that have nothing to say' {
             $text = Get-CertToolboxTlsCertificate -HostName 'test.example' | Get-TestDisplay
 
-            $text | Should -Not -Match '(?m)^(TargetHost|StartTls|PolicyError|ChainStatus|MissingIntermediate|ServerSentRoot|UnusedServerCertificate|UrlTest)\s+:'
+            $text | Should -Not -Match '(?m)^(TargetHost|StartTls|PolicyError|ChainStatus|MissingIntermediate|ServerSentRoot|UnusedServerCertificate|UrlTest|ServerChainSource)\s+:'
         }
 
         It 'shows what is wrong with a chain' {
